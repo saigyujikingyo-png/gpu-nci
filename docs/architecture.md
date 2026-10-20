@@ -40,6 +40,7 @@ flowchart LR
 The current reader type and C descriptor are separate interfaces. A future
 adapter must explicitly transfer Z-fastest storage, invert/transpose conventions
 and metadata; the existence of both libraries alone is not pipeline integration.
+The [adapter contract](adapter-contract.md) defines that next M1 gate.
 
 ## Numerical boundary
 
