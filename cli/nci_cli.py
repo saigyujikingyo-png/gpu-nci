@@ -93,6 +93,28 @@ def checked(value, name):
     return value
 
 
+def memory_lower_bound(card, npoints):
+    """Tracked allocation reservation, excluding only unknown atom storage."""
+    shape, comp = card["grid"]["shape"], card["compute"]
+    q = 97 if comp["output_mode"] == "diagnostic" else 25
+    if comp["layout"] == "full_grid":
+        result = checked(npoints * (8 + q), "tracked point allocation")
+        tables = checked(checked(sum(shape), "axis nodes") * 40, "axis allocation")
+    else:
+        block = comp["slab_planes"]
+        plane = checked(shape[1] * shape[2], "plane size")
+        halo = checked(checked(block + 4, "halo planes") * plane, "slab input extent")
+        output = checked(block * plane, "slab output extent")
+        result = checked(npoints * 8, "complete density allocation")
+        result = checked(result + checked(halo * 8, "slab input allocation"), "allocation")
+        result = checked(result + checked(output * q, "slab field allocation"), "allocation")
+        nodes = checked(checked(block + shape[1], "axis nodes") + shape[2], "axis nodes")
+        tables = checked(nodes * 40, "axis allocation")
+    result = checked(result + tables, "allocation")
+    result = checked(result + 8192 + 65536 + 4096 * comp["omp_threads"], "allocation")
+    return result
+
+
 def validate_card(card):
     exact_object(card, {"schema_version", "input", "grid", "metadata", "compute", "limits"}, "card")
     integer(card["schema_version"], "schema_version", 1, 1)
@@ -129,9 +151,14 @@ def validate_card(card):
     for p, endpoint in zip(periodic, endpoints):
         integer(p, "metadata.periodic entry", 0, 1)
         text_enum(endpoint, ("independent_samples" if p else "finite_nodes",), "endpoint_convention")
-    exact_object(comp, {"backend", "layout", "output_mode", "rho_min", "negative_tolerance", "omp_threads"}, "compute")
+    compute_keys = {"backend", "layout", "output_mode", "rho_min", "negative_tolerance", "omp_threads"}
+    if type(comp) is dict and comp.get("layout") == "x_slabs":
+        compute_keys.add("slab_planes")
+    exact_object(comp, compute_keys, "compute")
     text_enum(comp["backend"], ("cpu",), "compute.backend")
-    text_enum(comp["layout"], ("full_grid",), "compute.layout")
+    text_enum(comp["layout"], ("full_grid", "x_slabs"), "compute.layout")
+    if comp["layout"] == "x_slabs":
+        integer(comp["slab_planes"], "compute.slab_planes", 1, grid["shape"][0])
     text_enum(comp["output_mode"], ("full", "diagnostic"), "compute.output_mode")
     real(comp["rho_min"], "compute.rho_min", positive=True)
     real(comp["negative_tolerance"], "compute.negative_tolerance", nonnegative=True)
@@ -142,12 +169,10 @@ def validate_card(card):
     integer(limits["timeout_seconds"], "limits.timeout_seconds", 1, 3600)
     if npoints > limits["max_points"]:
         fail("card", "grid exceeds max_points")
+    checked(npoints * 48, "global ABI byte extent")
     # This lower bound deliberately excludes atoms: only the native reader can
     # account for them before allocation. This is not a process RSS limit.
-    per_point = 105 if comp["output_mode"] == "diagnostic" else 33
-    reservation = checked(npoints * per_point, "tracked point allocation")
-    reservation = checked(reservation + checked(sum(grid["shape"]) * 40, "axis allocation"), "allocation")
-    reservation = checked(reservation + 8192 + 65536 + 4096 * comp["omp_threads"], "allocation")
+    reservation = memory_lower_bound(card, npoints)
     if reservation > limits["memory_budget_bytes"]:
         fail("card", "memory budget is below the tracked reservation before atoms")
     return npoints
@@ -206,6 +231,10 @@ def namelist(card):
               f" omp_threads = {comp['omp_threads']},",
               f" memory_budget_bytes = {limits['memory_budget_bytes']},",
               f" max_points = {limits['max_points']}", "/", ""]
+    if comp["layout"] == "x_slabs":
+        # MAX_POINTS was the old final assignment; separate it before extension.
+        lines[-3] += ","
+        lines[-2:-2] = [" layout_mode = 1,", f" slab_planes = {comp['slab_planes']},"]
     return "\n".join(lines).encode("ascii")
 
 
