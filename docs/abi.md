@@ -40,6 +40,13 @@ No grid/quantization certification is supplied by this ABI: bit 6 is always
 set at numerically valid points. Bit 5 uses the numerical bound documented
 by the implementation. Do not imply scientific sign acceptance.
 
+The initial CPU numerical policy assumes IEEE binary64, round-to-nearest,
+gradual underflow, and compilation without floating-point contraction or
+value-changing fast-math transformations. Callers must preserve these conditions;
+the library does not change process-wide rounding or denormal modes. FTZ/DAZ
+modes and externally changed rounding modes are outside this initial support
+contract. Synthetic test passes are not a formal proof of the numerical bound.
+
 Null errbuf is allowed only with len=0. Non-null errbuf with len=0 is permitted
 and not touched. Any positive length is bounded and NUL terminated.
 Create sets *context null before any failure when context is non-null.

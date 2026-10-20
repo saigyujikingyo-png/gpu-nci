@@ -1,6 +1,7 @@
 # Development sequence
 
-Status at scaffold: M0 prepared in part, implementation not yet accepted.
+M0 environment preparation is verified. M1 implementation is under independent
+review; see [acceptance status](status.md) for the actual test boundary.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and
@@ -13,6 +14,14 @@ Status at scaffold: M0 prepared in part, implementation not yet accepted.
 CPU implementation and independent tests are developed in separate branches.
 Draft PRs are review artifacts; branch merge requires the user's confirmation.
 The root checkout is the single-writer architecture/integration checkout.
+
+The current M1 branches deliver separate reader and field-evaluation libraries.
+After their review and approval, M1 still needs an explicit metadata-to-ABI
+adapter and a minimal offline CLI with tiny synthetic end-to-end tests. Source
+provenance, units, Z-fastest order and matrix conventions must be transferred
+explicitly; successful tests of the two libraries do not by themselves establish
+that connection. Full-grid/slab work follows this interface check. No scaling
+or speedup conclusion follows from thread-count consistency tests.
 
 The original design remains frozen outside this repository. A toolchain
 correction discovered during kickoff: the current HPC SDK 26.9 Linux x86-64
