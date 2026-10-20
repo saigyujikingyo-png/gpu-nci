@@ -43,6 +43,8 @@ implementation. If `cc` is unavailable, that probe alone explicitly skips.
   to 40, so it cannot pass merely by rejecting a declared zero capacity.
   Spectral-condition fixtures accept 999, reject 1001, and accept a shear with
   kappa2 about 963 despite its infinity-norm condition 1024.
+  A separate isolated INT64_MIN tile_count case checks that rejecting negative
+  extents does not first evaluate an overflowing global_n-minus-count expression.
 - Noncubic, skew and left-handed quadratic fixtures provide exact Cartesian
   g/H and expose Z-fastest or matrix-transpose mistakes. Constant fields and
   positive/negative middle eigenvalues are covered. Tolerances are the fixed
@@ -65,6 +67,9 @@ implementation. If `cc` is unavailable, that probe alone explicitly skips.
   A negative sample at the periodic origin separately checks wrap across all
   three global boundaries. Repeated eigenvalues and nonconstant FULL outputs
   are tested independently of DIAGNOSTIC buffers.
+  A unique-interior-point RDG overflow fixture checks NUMERIC_FAILURE status,
+  bit4/stats, and NaN in every scalar and DIAGNOSTIC grad/hess output. Its finite
+  derivatives/eigenvalues and nonrepresentable RDG are independently self-checked.
 - The same nontrivial skew periodic field is evaluated with omp_threads=1,4,16.
   Each run is checked against the independent Fourier reference, then against
   the one-thread fields with unchanged numeric tolerances and exact flags,
@@ -97,6 +102,12 @@ test's unavailable-library fixture. No actual production library was evaluated:
 **production CPU core NOT_TESTED**. Once a library is supplied, the hook test
 will still explicitly skip for lack of a standardized public test-only ABI.
 The new ignored XML report is `runs/reference-only-astra-fixes-20261020.xml`.
+
+After adding the RDG-overflow diagnostic-NaN and INT64_MIN extent regressions,
+the no-library self-check completed with **20 passed, 90 skipped**, exit 0.
+All 90 skips are missing actual-library integration, not core passes. Evidence:
+`runs/reference-only-failure-regressions-20261020.xml`. The earlier two XML
+reports remain preserved.
 
 Execution details and remaining work are recorded in local ignored
 `.agents/handoff.md`. Reference self-tests do not establish production-core

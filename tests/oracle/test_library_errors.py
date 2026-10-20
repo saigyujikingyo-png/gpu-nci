@@ -241,3 +241,27 @@ print('OVERFLOW_REJECTED_WITHOUT_WRITES')
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OVERFLOW_REJECTED_WITHOUT_WRITES" in result.stdout
+
+
+def test_int64_min_tile_count_rejected_before_extent_arithmetic(library):
+    # Fortran logical .or. is not a short-circuit guarantee. A library must not
+    # evaluate global_n - INT64_MIN while trying to reject a negative extent.
+    root = Path(__file__).resolve().parents[2]
+    code = """
+import os
+import numpy as np
+from reference.abi import Evaluation, Library, options, INVALID_ARGUMENT
+lib = Library(os.environ['NCI_LIBRARY'])
+case = Evaluation(np.ones((5,5,5)))
+case.tile.tile_count[0] = -(2**63)
+before = case.snapshot()
+with lib.context(options()) as handle:
+    status, error = lib.run(handle, case)
+assert status == INVALID_ARGUMENT, (status, error)
+assert case.unchanged(before)
+print('INT64_MIN_EXTENT_REJECTED_WITHOUT_WRITES')
+"""
+    result = subprocess.run([sys.executable, "-c", code], cwd=root, env=os.environ.copy(),
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "INT64_MIN_EXTENT_REJECTED_WITHOUT_WRITES" in result.stdout

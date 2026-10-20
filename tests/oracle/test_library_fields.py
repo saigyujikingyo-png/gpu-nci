@@ -3,7 +3,8 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
 
-from reference.abi import (DIAGNOSTIC, FULL, INVALID_INPUT, OK, Evaluation, options)
+from reference.abi import (DIAGNOSTIC, FULL, INVALID_INPUT, NUMERIC_FAILURE,
+                           OK, Evaluation, options)
 from reference.fields import (INVALID, NUM_UNCERTAIN, SCI_UNCERTAIN, FAILURE,
     STENCIL, input_flags, fd4, nci, pack_hessian, periodic_fourier, quadratic)
 
@@ -227,6 +228,31 @@ def test_all_invalid_returns_populated_flags_and_stats(library, record_property)
     assert status == INVALID_INPUT, error
     valid = check_flags_stats(case, input_flags(rho), record_property)
     assert not np.any(valid)
+
+
+def test_rdg_overflow_invalidates_all_diagnostic_outputs(library):
+    # The only interior point passes density preflight and has finite g/H/eigen,
+    # but its mathematically enormous RDG cannot be represented in binary64.
+    rho = np.ones((5, 5, 5))
+    rho[2, 2, 2], rho[3, 2, 2] = 1e-250, 2
+    case = Evaluation(rho)
+    with library.context(options(rho_min=1e-260)) as handle:
+        status, error = library.run(handle, case)
+    # A computed valid-path failure takes precedence over zero remaining valid
+    # points; this is NUMERIC_FAILURE, not ordinary all-invalid INVALID_INPUT.
+    assert status == NUMERIC_FAILURE, error
+    expected_flags = input_flags(rho, rho_min=1e-260)
+    expected_flags[2, 2, 2] |= FAILURE
+    assert_array_equal(case.flags, expected_flags)
+    for field in (case.rdg, case.signedrho, case.lambda2, case.grad, case.hess):
+        assert np.all(np.isnan(field))
+    assert case.stats.total_points == 125
+    assert case.stats.valid_points == 0
+    assert case.stats.invalid_points == 125
+    assert case.stats.numeric_failures == 1
+    for bit in range(7):
+        assert case.stats.bit_counts[bit] == np.count_nonzero(expected_flags & (1 << bit))
+    assert_array_equal(case.rho, rho)
 
 
 def test_optional_jacobi_nonconvergence_hook(library):

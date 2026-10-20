@@ -13,7 +13,8 @@ from scipy.linalg import eigvalsh
 from reference.abi import Options, Tile, Stats
 from reference.fields import (BOUNDARY, LOW, NONPOSITIVE, STENCIL, fd4,
                               gaussian, input_flags, pack_hessian,
-                              periodic_fourier, quadratic, stencil_offsets)
+                              periodic_fourier, quadratic, stencil_offsets,
+                              RDG_DENOMINATOR)
 
 ROOT = Path(__file__).resolve().parents[2]
 SKEW = np.array([[0.3, 0.05, -0.02], [0.02, 0.24, 0.04], [0, -0.03, 0.2]])
@@ -123,6 +124,20 @@ def test_overflow_fixture_would_evade_a_wrapped_capacity_check():
     assert product > 2**63 - 1
     assert product % 2**64 == 40
     assert 40 < 125 and 3 * 40 < 375 and 6 * 40 < 750
+
+
+def test_rdg_overflow_fixture_has_finite_derivatives_and_nonfinite_rdg():
+    rho = np.ones((5, 5, 5))
+    rho[2, 2, 2], rho[3, 2, 2] = 1e-250, 2
+    grad, hess = fd4(rho, np.eye(3))
+    center = (2, 2, 2)
+    assert input_flags(rho, rho_min=1e-260)[center] == 0
+    assert_allclose(grad[center], [2/3, 0, 0], atol=1e-15, rtol=0)
+    assert_allclose(hess[center], np.diag([23/6, 2.5, 2.5]), atol=1e-14, rtol=0)
+    assert np.all(np.isfinite(eigvalsh(hess[center], driver="evr")))
+    with np.errstate(over="ignore", under="ignore", divide="ignore"):
+        rdg = np.linalg.norm(grad[center]) / (RDG_DENOMINATOR * rho[center]**(4/3))
+    assert np.isinf(rdg)
 
 
 def test_zero_and_low_are_not_invalid_stencil_samples():
