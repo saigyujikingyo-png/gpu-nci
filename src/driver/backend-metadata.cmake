@@ -1,0 +1,6 @@
+include("${CMAKE_CURRENT_LIST_DIR}/build-string.cmake")
+file(READ "${INPUT_FILE}" _backend_path)
+set(_nci_metadata "module nci_driver_backend\nimplicit none\ncontains\n")
+nci_build_string(build_backend_library "${_backend_path}")
+string(APPEND _nci_metadata "end module\n")
+file(WRITE "${OUTPUT_FILE}" "${_nci_metadata}")
