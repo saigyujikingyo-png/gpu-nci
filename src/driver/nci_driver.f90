@@ -1,0 +1,443 @@
+! Original thin adapter. Numerical work is only through the public C ABI.
+module nci_driver_support
+  use, intrinsic :: iso_c_binding
+  use, intrinsic :: iso_fortran_env, only: int64, error_unit, output_unit
+  use, intrinsic :: ieee_arithmetic
+  use nci_abi
+  use nci_cube_input
+  use nci_driver_build
+  use nci_driver_backend
+  implicit none
+  private
+  public :: execute_run, emit_build_info, argument
+  interface
+    function context_create(options, context, error, length) bind(C,name='nci_context_create_v1') result(rc)
+      import :: c_ptr, c_size_t, c_int
+      type(c_ptr), value :: options, context, error
+      integer(c_size_t), value :: length
+      integer(c_int) :: rc
+    end function
+    function evaluate(context,tile,rho,rdg,signedrho,lambda2,grad,hess,flags,stats,error,length) &
+        bind(C,name='nci_eval_tile_f64_v1') result(rc)
+      import :: c_ptr, c_size_t, c_int
+      type(c_ptr), value :: context,tile,rho,rdg,signedrho,lambda2,grad,hess,flags,stats,error
+      integer(c_size_t), value :: length
+      integer(c_int) :: rc
+    end function
+    function context_destroy(context,error,length) bind(C,name='nci_context_destroy_v1') result(rc)
+      import :: c_ptr, c_size_t, c_int
+      type(c_ptr), value :: context,error
+      integer(c_size_t), value :: length
+      integer(c_int) :: rc
+    end function
+  end interface
+  interface write_field
+    module procedure write_scalar_field, write_diagnostic_field, write_flags
+  end interface
+contains
+  function argument(index) result(value)
+    integer, intent(in) :: index
+    character(:), allocatable :: value
+    integer :: length, ios
+    call get_command_argument(index,length=length,status=ios)
+    if (ios/=0) then
+      value=''; return
+    end if
+    allocate(character(length)::value,stat=ios)
+    if (ios/=0) then
+      value=''; return
+    end if
+    call get_command_argument(index,value=value,status=ios)
+    if (ios/=0) value=''
+  end function
+
+  function json_string(text) result(value)
+    character(*), intent(in) :: text
+    character(:), allocatable :: value
+    character(6) :: escape
+    integer :: i, code
+    value='"'
+    do i=1,len(text)
+      code=iachar(text(i:i))
+      select case(code)
+      case(34,92)
+        value=value//achar(92)//text(i:i)
+      case(0:31)
+        write(escape,'(a,z4.4)') achar(92)//'u',code
+        value=value//escape
+      case default
+        value=value//text(i:i)
+      end select
+    end do
+    value=value//'"'
+  end function
+
+  function decimal(value) result(text)
+    integer(c_int64_t), intent(in) :: value
+    character(:), allocatable :: text
+    character(32) :: buffer
+    write(buffer,'(i0)') value
+    text=trim(buffer)
+  end function
+
+  function c_message(error) result(text)
+    character(c_char), intent(in) :: error(:)
+    character(:), allocatable :: text
+    integer :: i
+    text=''
+    do i=1,size(error)
+      if (error(i)==c_null_char) exit
+      text=text//error(i)
+    end do
+  end function
+
+  integer function emit_build_info() result(rc)
+    integer :: ios
+    rc=1
+    write(output_unit,'(a)',iostat=ios) '{"protocol_version":1,"source_revision":'//json_string(build_revision())// &
+      ',"compiler_id":'//json_string(build_compiler_id())// &
+      ',"compiler_version":'//json_string(build_compiler_version())// &
+      ',"build_type":'//json_string(build_type())//',"fp_policy":'//json_string(build_fp_policy())// &
+      ',"backend_library":'//json_string(build_backend_library())//'}'
+    if (ios/=0) return
+    flush(output_unit,iostat=ios)
+    if (ios==0) rc=0
+  end function
+
+  logical function supported_representation()
+    integer(c_int8_t) :: bytes(4)
+    supported_representation=.false.
+    if (storage_size(0.0_c_double)/=64.or.storage_size(0_c_int8_t)/=8) return
+    if (radix(0.0_c_double)/=2.or.digits(0.0_c_double)/=53) return
+    if (.not.ieee_support_datatype(0.0_c_double)) return
+    bytes=transfer(1_c_int32_t,bytes)
+    if (any(bytes/=[1_c_int8_t,0_c_int8_t,0_c_int8_t,0_c_int8_t])) return
+    supported_representation=.true.
+  end function
+
+  subroutine native_receipt(directory,stage,message,complete,abi_status,npoints,stats,stats_ready,ios)
+    character(*), intent(in) :: directory,stage,message
+    logical, intent(in) :: complete,stats_ready
+    integer, intent(in) :: abi_status
+    integer(c_int64_t), intent(in) :: npoints
+    type(nci_tile_stats_v1), intent(in) :: stats
+    integer, intent(out) :: ios
+    integer :: unit, close_ios, i
+    character(:), allocatable :: text, state, abi
+    state='failed'
+    if (complete) state='completed'
+    abi='null'
+    if (abi_status>=0) abi=decimal(int(abi_status,c_int64_t))
+    text='{"protocol_version":1,"state":'//json_string(state)//',"stage":'//json_string(stage)// &
+      ',"message":'//json_string(message)//',"abi_status":'//abi//',"npoints":'//decimal(npoints)//',"stats":'
+    if (stats_ready) then
+      text=text//'{"total":'//decimal(stats%total_points)//',"valid":'//decimal(stats%valid_points)// &
+        ',"invalid":'//decimal(stats%invalid_points)//',"numeric_failures":'//decimal(stats%numeric_failures)// &
+        ',"bit_counts":['
+      do i=1,7
+        if (i>1) text=text//','
+        text=text//decimal(stats%bit_counts(i))
+      end do
+      text=text//']}'
+    else
+      text=text//'null'
+    end if
+    text=text//'}'
+    open(newunit=unit,file=directory//'/native.json',status='new',action='write',iostat=ios)
+    if (ios/=0) return
+    write(unit,'(a)',iostat=ios) text
+    close(unit,iostat=close_ios)
+    if (ios==0) ios=close_ios
+  end subroutine
+
+  subroutine write_scalar_field(path,values,ios)
+    character(*), intent(in) :: path
+    real(c_double), intent(in) :: values(:)
+    integer, intent(out) :: ios
+    integer :: unit, close_ios
+    integer(c_int64_t) :: first,last,used
+    integer(c_int8_t) :: bytes(4096)
+    open(newunit=unit,file=path,status='new',access='stream',form='unformatted',action='write',iostat=ios)
+    if (ios/=0) return
+    ! One-byte stream elements cannot be endian-converted by compiler runtime
+    ! overrides. The host representation was checked before evaluation.
+    do first=1,size(values,kind=c_int64_t),512_c_int64_t
+      last=min(first+511_c_int64_t,size(values,kind=c_int64_t))
+      used=8*(last-first+1)
+      bytes(:used)=transfer(values(first:last),bytes,int(used))
+      write(unit,iostat=ios) bytes(:used)
+      if (ios/=0) exit
+    end do
+    close(unit,iostat=close_ios)
+    if (ios==0) ios=close_ios
+  end subroutine
+
+  subroutine write_diagnostic_field(path,values,ios)
+    character(*), intent(in) :: path
+    real(c_double), intent(in) :: values(:,:)
+    integer, intent(out) :: ios
+    integer :: unit, close_ios
+    integer(c_int64_t) :: first,last,used,chunk
+    integer(c_int8_t) :: bytes(4096)
+    open(newunit=unit,file=path,status='new',access='stream',form='unformatted',action='write',iostat=ios)
+    if (ios/=0) return
+    chunk=4096_c_int64_t/(8*size(values,1,kind=c_int64_t))
+    do first=1,size(values,2,kind=c_int64_t),chunk
+      last=min(first+chunk-1,size(values,2,kind=c_int64_t))
+      used=8*size(values,1,kind=c_int64_t)*(last-first+1)
+      bytes(:used)=transfer(values(:,first:last),bytes,int(used))
+      write(unit,iostat=ios) bytes(:used)
+      if (ios/=0) exit
+    end do
+    close(unit,iostat=close_ios)
+    if (ios==0) ios=close_ios
+  end subroutine
+
+  subroutine write_flags(path,values,ios)
+    character(*), intent(in) :: path
+    integer(c_int8_t), intent(in) :: values(:)
+    integer, intent(out) :: ios
+    integer :: unit, close_ios
+    open(newunit=unit,file=path,status='new',access='stream',form='unformatted',action='write',iostat=ios)
+    if (ios/=0) return
+    write(unit,iostat=ios) values
+    close(unit,iostat=close_ios)
+    if (ios==0) ios=close_ios
+  end subroutine
+
+  subroutine execute_run(input_path,settings_path,directory,exit_status)
+    character(*), intent(in) :: input_path,settings_path,directory
+    integer, intent(out) :: exit_status
+    integer :: protocol_version, periodic(3), output_mode, omp_threads
+    integer(int64) :: shape(3), memory_budget_bytes, max_points
+    real(c_double) :: origin(3),step_vectors(3,3),rho_min,negative_tolerance
+    character(128) :: endpoint_convention(3),quantity,spin_convention,density_representation,length_unit,density_unit
+    namelist /nci_run/ protocol_version,shape,origin,step_vectors,periodic,endpoint_convention, &
+      quantity,spin_convention,density_representation,length_unit,density_unit,output_mode, &
+      rho_min,negative_tolerance,omp_threads,memory_budget_bytes,max_points
+    type(cube_grid), target :: grid
+    type(cube_read_limits) :: limits
+    type(cube_metadata) :: metadata
+    type(cube_status) :: reader_status
+    type(nci_options_v1), target :: options
+    type(nci_tile_v1), target :: tile
+    type(nci_tile_stats_v1), target :: stats
+    type(c_ptr), target :: context
+    type(c_ptr) :: grad_ptr,hess_ptr
+    real(c_double), allocatable, target :: rdg(:),signedrho(:),lambda2(:),grad(:,:),hess(:,:)
+    integer(c_int8_t), allocatable, target :: flags(:)
+    character(c_char), target :: error(1024)
+    integer(c_int) :: rc,cleanup_rc
+    integer(c_int64_t) :: npoints,declared_points
+    integer :: ios,close_ios,unit,i,a,abi_status
+    character(1024) :: io_message,line
+    character(:), allocatable :: stage,message
+    logical :: complete,stats_ready
+    protocol_version=-1; shape=-1_int64; periodic=-1; output_mode=-1; omp_threads=-1
+    memory_budget_bytes=-1_int64; max_points=-1_int64
+    origin=ieee_value(0.0_c_double,ieee_quiet_nan); step_vectors=origin(1)
+    rho_min=origin(1); negative_tolerance=origin(1)
+    endpoint_convention=''; quantity=''; spin_convention=''; density_representation=''; length_unit=''; density_unit=''
+    context=c_null_ptr; grad_ptr=c_null_ptr; hess_ptr=c_null_ptr
+    stats%total_points=0; stats%valid_points=0; stats%invalid_points=0; stats%numeric_failures=0; stats%bit_counts=0
+    npoints=0; complete=.false.; stats_ready=.false.; abi_status=-1
+    stage='settings'; message='Invalid worker settings'; exit_status=1
+    io_message=''
+    body: block
+      open(newunit=unit,file=settings_path,status='old',action='read',iostat=ios,iomsg=io_message)
+      if (ios/=0) then
+        message='Cannot open namelist: '//trim(io_message); exit body
+      end if
+      read(unit,nml=nci_run,iostat=ios,iomsg=io_message)
+      if (ios==0) then
+        do
+          read(unit,'(a)',iostat=ios) line
+          if (ios/=0) exit
+          if (len_trim(line)>0) then
+            ios=1; io_message='Unexpected content after nci_run'; exit
+          end if
+        end do
+        if (ios<0) ios=0
+      end if
+      close(unit,iostat=close_ios)
+      if (ios==0) ios=close_ios
+      if (ios/=0) then
+        message='Invalid namelist: '//trim(io_message); exit body
+      end if
+      if (protocol_version/=1.or.any(shape<5).or.memory_budget_bytes<1.or.max_points<1) exit body
+      if (output_mode/=0.and.output_mode/=1) exit body
+      if (omp_threads<1.or.omp_threads>16) exit body
+      if (.not.all(ieee_is_finite(origin)).or..not.all(ieee_is_finite(step_vectors))) exit body
+      if (.not.ieee_is_finite(rho_min).or..not.ieee_is_finite(negative_tolerance)) exit body
+      if (rho_min<=0.or.negative_tolerance<0) exit body
+      declared_points=1_c_int64_t
+      do i=1,3
+        if (declared_points>huge(declared_points)/shape(i)) then
+          message='Declared shape product exceeds int64'; exit body
+        end if
+        declared_points=declared_points*shape(i)
+      end do
+      if (declared_points>max_points) then
+        message='Declared shape exceeds max_points'; exit body
+      end if
+      stage='representation'
+      if (.not.supported_representation()) then
+        message='Little-endian IEEE binary64 and 8-bit flags required'; exit body
+      end if
+      stage='input'
+      limits%max_bytes=memory_budget_bytes; limits%max_points=max_points
+      limits%reserve_bytes_per_point=25_int64
+      if (output_mode==1) limits%reserve_bytes_per_point=97_int64
+      limits%reserve_bytes_per_axis_node=40_int64
+      limits%reserve_fixed_bytes=65536_int64+4096_int64*omp_threads
+      call read_cube(input_path,grid,reader_status,limits)
+      if (reader_status%code/=CUBE_OK) then
+        message='CUBE code '//decimal(int(reader_status%code,c_int64_t))//': '//trim(reader_status%message)
+        if (reader_status%code==CUBE_MEMORY_LIMIT.or.reader_status%code==CUBE_ALLOCATION) stage='memory'
+        if (reader_status%code==CUBE_IO_ERROR) stage='io'
+        exit body
+      end if
+      stage='geometry'
+      if (any(grid%shape/=shape).or.any(grid%origin/=origin).or.any(grid%j/=step_vectors)) then
+        message='CUBE geometry differs from parsed binary64 declarations'; exit body
+      end if
+      stage='metadata'
+      message='Unsupported or missing metadata declaration'
+      ! Check strings before narrowing them to the reader's fixed field lengths.
+      if (quantity/='electron_density'.or.spin_convention/='spin_summed') exit body
+      if (length_unit/='bohr'.or.density_unit/='electron/bohr^3') exit body
+      select case(trim(density_representation))
+      case('all_electron','valence','core_augmented','promolecular')
+      case default
+        exit body
+      end select
+      do i=1,3
+        select case(periodic(i))
+        case(0)
+          if (endpoint_convention(i)/='finite_nodes') exit body
+        case(1)
+          if (endpoint_convention(i)/='independent_samples') exit body
+        case default
+          exit body
+        end select
+      end do
+      metadata%quantity=quantity; metadata%spin_convention=spin_convention
+      metadata%density_representation=density_representation; metadata%length_unit=length_unit
+      metadata%density_unit=density_unit; metadata%periodic=periodic
+      metadata%endpoint_convention=endpoint_convention; metadata%negative_tolerance=negative_tolerance
+      call validate_cube_metadata(grid,metadata,reader_status)
+      if (reader_status%code/=CUBE_OK) then
+        message=trim(reader_status%message); exit body
+      end if
+      npoints=grid%npoints
+      stage='memory'; message='Cannot allocate output arrays'
+      allocate(rdg(npoints),signedrho(npoints),lambda2(npoints),flags(npoints),stat=ios)
+      if (ios/=0) exit body
+      if (output_mode==1) then
+        allocate(grad(3,npoints),hess(6,npoints),stat=ios)
+        if (ios/=0) exit body
+        grad_ptr=c_loc(grad(1,1)); hess_ptr=c_loc(hess(1,1))
+      end if
+      options%abi_version=NCI_ABI_VERSION; options%struct_bytes=int(c_sizeof(options),c_int32_t)
+      options%backend=NCI_CPU; options%output_mode=output_mode; options%omp_threads=omp_threads
+      options%reserved=0; options%rho_min=rho_min; options%negative_tolerance=negative_tolerance
+      tile%abi_version=NCI_ABI_VERSION; tile%struct_bytes=int(c_sizeof(tile),c_int32_t)
+      tile%global_n=shape; tile%tile_start=0; tile%tile_count=shape
+      tile%input_origin=0; tile%input_shape=shape
+      tile%input_strides=[shape(2)*shape(3),shape(3),1_int64]
+      do i=1,3
+        do a=1,3
+          tile%j_inv(3*(i-1)+a)=grid%j_inv(i,a)
+        end do
+      end do
+      tile%periodic=periodic; tile%reserved=0
+      tile%rho_capacity=npoints; tile%field_capacity=npoints; tile%flags_capacity=npoints
+      tile%grad_capacity=0; tile%hess_capacity=0
+      if (output_mode==1) then
+        tile%grad_capacity=3*npoints; tile%hess_capacity=6*npoints
+      end if
+      stage='abi_create'; error=c_null_char
+      rc=context_create(c_loc(options),c_loc(context),c_loc(error),size(error,kind=c_size_t))
+      abi_status=rc
+      if (rc/=NCI_OK) then
+        message=c_message(error); exit body
+      end if
+      stage='numerics'; error=c_null_char
+      rc=evaluate(context,c_loc(tile),c_loc(grid%rho(1)),c_loc(rdg(1)),c_loc(signedrho(1)), &
+        c_loc(lambda2(1)),grad_ptr,hess_ptr,c_loc(flags(1)),c_loc(stats),c_loc(error),size(error,kind=c_size_t))
+      abi_status=rc; message=c_message(error)
+      stats_ready=(stats%total_points==npoints)
+      ! Only evaluated fields are exportable. ABI failures before evaluation
+      ! leave stats at zero and uninitialized output arrays are never written.
+      if (stats_ready) then
+        call write_field(directory//'/rdg.f64',rdg,ios)
+        if (ios==0) call write_field(directory//'/lambda2.f64',lambda2,ios)
+        if (ios==0) call write_field(directory//'/signedrho.f64',signedrho,ios)
+        if (ios==0) call write_field(directory//'/flags.u8',flags,ios)
+        if (output_mode==1) then
+          if (ios==0) call write_field(directory//'/grad.f64',grad,ios)
+          if (ios==0) call write_field(directory//'/hess.f64',hess,ios)
+        end if
+        if (ios/=0) then
+          if (rc==NCI_OK) then
+            stage='io'; message='Cannot exclusively create/write/close raw field'
+          else
+            message=message//'; raw output IO also failed'
+          end if
+          exit body
+        end if
+      end if
+      if (rc/=NCI_OK) exit body
+      complete=.true.; stage='complete'; message='Numerical completion; scientific uncertainty unknown'
+    end block body
+    if (c_associated(context)) then
+      error=c_null_char
+      cleanup_rc=context_destroy(context,c_loc(error),size(error,kind=c_size_t))
+      context=c_null_ptr
+      if (cleanup_rc/=NCI_OK) then
+        if (complete) then
+          stage='cleanup'; message='Context cleanup failed: '//c_message(error)
+        else
+          message=message//'; context cleanup also failed: '//c_message(error)
+        end if
+        complete=.false.
+      end if
+    end if
+    call native_receipt(directory,stage,message,complete,abi_status,npoints,stats,stats_ready,ios)
+    if (ios/=0) then
+      write(error_unit,'(a)') 'native receipt IO failed; original status: '//stage//': '//message
+      complete=.false.
+    end if
+    if (complete) then
+      exit_status=0
+    else
+      write(error_unit,'(a)') stage//': '//message
+    end if
+  end subroutine
+end module
+
+program nci_driver
+  use, intrinsic :: iso_c_binding, only: c_int
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  use nci_driver_support
+  implicit none
+  integer :: exit_status
+  interface
+    subroutine process_exit(status) bind(C,name='exit')
+      import :: c_int
+      integer(c_int), value :: status
+    end subroutine
+  end interface
+  if (command_argument_count()==1) then
+    if (argument(1)=='--build-info') then
+      exit_status=emit_build_info()
+      call process_exit(int(exit_status,c_int))
+    end if
+  end if
+  if (command_argument_count()/=3) then
+    write(error_unit,'(a)') 'usage: nci_driver INPUT.cube SETTINGS.nml OUTPUT_DIRECTORY | --build-info'
+    call process_exit(1_c_int)
+  end if
+  call execute_run(argument(1),argument(2),argument(3),exit_status)
+  call process_exit(int(exit_status,c_int))
+end program
