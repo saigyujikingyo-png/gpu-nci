@@ -86,8 +86,27 @@ different; neither permits a success marker.
 ## Execution evidence
 
 Initial no-executable self-check: **5 passed,32 skipped**, exit0. All32 skips
-are explicit NCI_DRIVER/NCI_CLI absence. The actual CLI-to-native path is
-**NOT_TESTED**, not PASS. Ignored private report:
-`runs/e2e-fixture-only-20261020.xml`. Local handoff records commands and revisions.
-No electronic-structure computation, science acceptance, benchmark or source
-mutation was performed. Full M1/real-data/GPU gates remain separate.
+were explicit NCI_DRIVER/NCI_CLI absence. This historical fixture-only run did
+not test the real CLI-to-native path. Its ignored private report remains
+`runs/e2e-fixture-only-20261020.xml`.
+
+Subsequent combined execution supersedes that partial integration state:
+**37 end-to-end tests passed, 0 skipped in each of GNU Debug, GNU Release and
+NVHPC Debug**, using real native drivers and backend libraries. The four source
+revisions were root `36b2594`, reader/adapter `8fef3df`, CLI/driver `a76542f`,
+and independent e2e tests `9f3e212`. All four checkouts were clean before and
+after execution, with unchanged HEAD/status; build-info preserved the complete
+combined revision declaration.
+
+GNU Debug and Release each passed all 17 CTests with 0 CTest skips. NVHPC Debug
+passed 15 CTests with 1 explicit binary128-unavailable skip; original quad tests
+were not built and are not counted as passes. In every configuration, CLI unit
+tests passed 40/40, native-driver protocol tests 12/12, reader synthetic tests 33/33,
+and actual-library oracle tests 113 with 1 documented public-Jacobi-hook skip.
+Configure, build, build-info and CTest commands all exited 0. The two private
+combined reports are `combined_cli_20261020T212727777955Z.json` and
+`combined_cli_20261020T212826270428Z.json`; local handoff records their location.
+
+These are finite CPU synthetic integration results. No electronic-structure
+computation, real-density scientific acceptance, benchmark or measured speedup
+is claimed. Real-data and application-level GPU gates remain separate.
