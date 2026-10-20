@@ -330,6 +330,7 @@ def test_subnormal_gradient_retains_positive_finite_rdg(library, record_property
     assert_array_equal(case.grad[2, 2, 2, 1:], 0)
     assert_array_equal(case.hess[2, 2, 2], 0)
     assert case.lambda2[2, 2, 2] == case.signedrho[2, 2, 2] == 0
+    assert case.flags[2, 2, 2] == NUM_UNCERTAIN | SCI_UNCERTAIN
     assert np.isfinite(case.rdg[2, 2, 2]) and case.rdg[2, 2, 2] > 0
     record_property("actual_rdg_binary64", repr(float(case.rdg[2, 2, 2])))
     # A normal absolute tolerance would let a spuriously zero result pass when
