@@ -1,8 +1,9 @@
 # Development sequence
 
 M0 environment preparation is verified. The first M1 libraries and independent
-tests passed combined synthetic checks and review in separate draft PRs.
-Integration awaits user confirmation; the adapter and CLI remain outstanding.
+tests passed combined synthetic checks and review; PRs #1, #2 and #3 were merged
+with user approval on 2026-10-20. The adapter and CLI are in development under
+the [frozen integration protocol](cli-contract.md).
 See [acceptance status](status.md) for the actual test boundary.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
@@ -17,8 +18,8 @@ CPU implementation and independent tests are developed in separate branches.
 Draft PRs are review artifacts; branch merge requires the user's confirmation.
 The root checkout is the single-writer architecture/integration checkout.
 
-The current M1 branches deliver separate reader and field-evaluation libraries.
-After their review and approval, M1 still needs an explicit metadata-to-ABI
+The merged M1 libraries provide the reader and field evaluation. M1 still needs
+an explicit metadata-to-ABI
 adapter and a minimal offline CLI with tiny synthetic end-to-end tests. Source
 provenance, units, Z-fastest order and matrix conventions must be transferred
 explicitly; successful tests of the two libraries do not by themselves establish

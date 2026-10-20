@@ -8,10 +8,10 @@ Updated 2026-10-20.
 | GNU toolchain | Verified | GCC/G++/gfortran 13.3; trivial programs compile and exit 0 |
 | Isolated Python toolchain | Verified | Python 3.12.3; pinned development requirements; pip check |
 | C ABI layout | PASS | 1 CTest, options=40 / tile=280 / stats=88 bytes |
-| CPU numerical implementation | Draft PR #3, synthetic PASS | Dense-grid FP64 fields, flags, diagnostics and bounded OpenMP; independent review closed |
-| Independent numerical oracle | Draft PR #1, actual-library PASS | 113 passed / 1 documented skip on each of three built libraries |
-| Strict CUBE reader | Draft PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
-| Reader-to-ABI adapter and offline CLI | NOT_IMPLEMENTED | Next M1 gate; library tests do not establish an end-to-end pipeline |
+| CPU numerical implementation | Merged PR #3, synthetic PASS | Dense-grid FP64 fields, flags, diagnostics and bounded OpenMP; independent review closed |
+| Independent numerical oracle | Merged PR #1, actual-library PASS | 113 passed / 1 documented skip on each of three built libraries |
+| Strict CUBE reader | Merged PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
+| Reader-to-ABI adapter and offline CLI | IN_DEVELOPMENT | Frozen CLI protocol; library tests do not establish an end-to-end pipeline |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |
@@ -71,7 +71,10 @@ These commands exercise small synthetic fixtures only.
 Review artifacts: [independent tests](https://github.com/saigyujikingyo-png/gpu-nci/pull/1),
 [CUBE reader](https://github.com/saigyujikingyo-png/gpu-nci/pull/2),
 [CPU core](https://github.com/saigyujikingyo-png/gpu-nci/pull/3).
-All remain draft and unmerged pending user confirmation.
+All three were merged with user approval on 2026-10-20. Merged main `b1df82c`
+also passed [CPU CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39493005661).
+The new adapter, CLI and end-to-end test branches remain separate until their
+combined acceptance, review and the next concrete merge confirmation.
 
 AI-assisted development: Claude Opus 5.5 max authored the initial CPU core;
 GPT-6.1 Sol implemented the independent oracle, input reader and bounded

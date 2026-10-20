@@ -162,6 +162,25 @@ Write `manifest.json` with schema_version=1, state `running`, `failed`, or
 explicit grid/metadata/compute/limits/source declarations, build info and binary
 fingerprints, worker return code, native receipt and output file sizes/hashes.
 Unknown scientific uncertainty is recorded; success is numerical completion only.
+The exact top-level manifest keys are `schema_version`, `state`, `stage`,
+`message`, `card`, `input`, `grid`, `metadata`, `compute`, `limits`, `source`,
+`build`, `binaries`, `worker`, `native`, `settings`, `outputs`, `scientific`.
+`card` is `{path,sha256,bytes}`; `input` adds `snapshot:"input.cube"` to those
+keys. `grid/metadata/compute/limits/source` retain the card declarations.
+`build` is the build-info object; `binaries` has `driver` and `backend_library`
+objects, each `{path,sha256,bytes}`. `worker` is
+`{returncode,timed_out,timeout_seconds}`; `native` is the native receipt;
+`settings` is `{path:"settings.nml",sha256,bytes}`. Unknown objects on failure
+are null; `outputs` starts as an empty object. `scientific` is
+`{certified:false,uncertainty:"unknown",completion:"numerical_only"}`.
+`outputs` is indexed by filename; entries have `sha256`, `bytes`,
+`dtype` (`float64` or `uint8`), `byte_order` (`little`), `shape`
+([Nx,Ny,Nz] or [Nx,Ny,Nz,3/6]), `component_order`, `unit`, `point_order`
+(`z_fastest`), `storage_order` (`point_major`). Component arrays are
+`[rdg]`, `[lambda2]`, `[signedrho]`, `[flag_byte]`, `[gx,gy,gz]`, or
+`[xx,yy,zz,xy,xz,yz]`. Units are dimensionless for RDG/flags,
+electron/bohr^3 for signedrho, electron/bohr^4 for gradients and
+electron/bohr^5 for lambda2/Hessian.
 Manifest replacements are atomic and limited to this newly owned directory.
 Before success, require worker exit 0, valid native receipt and statistics,
 correct field byte sizes/hashes, unchanged input snapshot and binaries. Validate
