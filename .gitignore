@@ -1,0 +1,17 @@
+/build*/
+/.venv/
+/.agents/
+/runs/
+/private/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.mod
+*.smod
+*.o
+*.so
+*.dll
+*.exe
+.env*
+*.cube
+!tests/fixtures/*.cube
