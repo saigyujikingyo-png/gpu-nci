@@ -36,3 +36,26 @@ Sources:
 Actual scientific solver runs and performance benchmarks are NOT part of
 agent-driven development tests. Preparation, successful build, synthetic
 validation, scientific acceptance, and performance reporting remain separate.
+
+## Research handoff gate
+
+Create `RESEARCH_HANDOFF.md` only after the first end-to-end scientific case
+has actually run and its outputs have been checked. A synthetic unit-test pass
+does not open this gate. Current implementation and correctness work take
+priority over presentation material; this addition does not change the frozen
+scientific specification.
+
+The concise document should let a computational chemist understand, in about
+five minutes: the scientific task; its GPU suitability; the density/NCI relation;
+CPU validation; measured speedup and error on the exact tested RTX 5070 model;
+implemented and missing capabilities relative to NCIPLOT and related tools;
+possible relevance to metal recovery or molecular materials; and three specific
+questions for research feedback. Performance values require actual execution,
+recorded baselines and scope; unmeasured items remain explicitly unmeasured.
+Describe the scope of AI-assisted development and independent checks. Use only
+inputs with authorized provenance and avoid claims of new scientific results
+from unvalidated algorithms.
+
+Keep the implementation understandable and maintainable at undergraduate level.
+Do not add machine learning, topological analysis or Monte Carlo functionality
+to this development scope.
