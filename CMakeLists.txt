@@ -26,10 +26,17 @@ endif()
 if(EXISTS "${NCI_IO_SOURCE_DIR}/CMakeLists.txt")
   add_subdirectory("${NCI_IO_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/io")
 endif()
-if(TARGET nci_cpu AND EXISTS "${NCI_ORACLE_DIR}/tests/oracle")
+if(EXISTS "${NCI_ORACLE_DIR}/tests/oracle")
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
-  add_test(NAME independent_oracle
-    COMMAND "${CMAKE_COMMAND}" -E env "NCI_LIBRARY=$<TARGET_FILE:nci_cpu>"
-      "${Python3_EXECUTABLE}" -m pytest -q "${NCI_ORACLE_DIR}/tests/oracle")
-  set_tests_properties(independent_oracle PROPERTIES TIMEOUT 180)
+  if(TARGET nci_cpu)
+    add_test(NAME independent_oracle
+      COMMAND "${CMAKE_COMMAND}" -E env "NCI_LIBRARY=$<TARGET_FILE:nci_cpu>"
+        "${Python3_EXECUTABLE}" -m pytest -q -ra "${NCI_ORACLE_DIR}/tests/oracle")
+    set_tests_properties(independent_oracle PROPERTIES TIMEOUT 180)
+  else()
+    add_test(NAME reference_selfchecks_only
+      COMMAND "${CMAKE_COMMAND}" -E env --unset=NCI_LIBRARY
+        "${Python3_EXECUTABLE}" -m pytest -q -ra "${NCI_ORACLE_DIR}/tests/oracle")
+    set_tests_properties(reference_selfchecks_only PROPERTIES TIMEOUT 180)
+  endif()
 endif()
