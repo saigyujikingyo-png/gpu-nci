@@ -11,7 +11,7 @@ Updated 2026-10-20.
 | CPU numerical implementation | Merged PR #3, synthetic PASS | Dense-grid FP64 fields, flags, diagnostics and bounded OpenMP; independent review closed |
 | Independent numerical oracle | Merged PR #1, actual-library PASS | 113 passed / 1 documented skip on each of three built libraries |
 | Strict CUBE reader | Merged PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
-| Reader-to-ABI adapter and offline CLI | IN_DEVELOPMENT | Frozen CLI protocol; library tests do not establish an end-to-end pipeline |
+| Reader-to-ABI adapter and offline CLI | Synthetic PASS, merge pending | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |
@@ -73,13 +73,58 @@ Review artifacts: [independent tests](https://github.com/saigyujikingyo-png/gpu-
 [CPU core](https://github.com/saigyujikingyo-png/gpu-nci/pull/3).
 All three were merged with user approval on 2026-10-20. Merged main `b1df82c`
 also passed [CPU CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39493005661).
-The new adapter, CLI and end-to-end test branches remain separate until their
-combined acceptance, review and the next concrete merge confirmation.
+The new adapter, CLI and end-to-end branches remain separate pending the next
+concrete merge confirmation. Their combined acceptance is recorded below.
+
+## Offline CPU CLI synthetic acceptance
+
+Actual execution on 2026-10-20 used four clean source revisions, unchanged at
+entry and exit: integration `36b259476f4d64bb406342e0b05ac48b28710db8`,
+reader reservation `8fef3df2e0305639c2aa84f14acabd2761e16802`,
+CLI and native worker `a76542f88bd9441989616ebf8993f2f244e00236`,
+independent e2e `9f3e2124367107cfb822fb6aaacc9a9e4b772de0`.
+Later status-only edits do not change these tested revisions.
+
+| Configuration | CTest passed / skipped | CLI e2e passed / skipped |
+|---|---:|---:|
+| GNU Fortran 13.3 Debug | 17 / 0 | 37 / 0 |
+| GNU Fortran 13.3 Release | 17 / 0 | 37 / 0 |
+| NVHPC 26.9 Debug, CPU execution | 15 / 1 | 37 / 0 |
+
+Each configuration additionally passed 40 CLI protocol tests, 12 actual native
+worker tests, 33 reader cases (165 native parser calls), and 113 independent
+actual-library oracle tests with the same one documented public-hook skip.
+NVHPC's CTest skip still records unavailable binary128; GNU ran those reference
+tests. All configure, build and CTest processes exited 0. Source/build declarations
+round-tripped exactly, and the local records retain executable/library hashes,
+raw logs, exit status and synthetic output files. No timing here is a benchmark.
+
+The e2e suite runs the real Python CLI and compiled Fortran worker on skew,
+non-cubic quadratic and mixed-periodic Fourier fixtures in full/diagnostic modes.
+It checks independent numerical expectations, point/component order, masks,
+statistics, snapshots, binary and output hashes, and the final manifest marker.
+Failure cases cover malformed cards, unsupported units, altered source hashes,
+geometry mismatches, allocation reservations, numeric overflow, zero valid
+points and existing output directories. No production formula or acceptance
+tolerance was changed to obtain these passes. Reproduction commands are in
+[integration](integration.md).
+
+Pending review artifacts: [contract/build integration](https://github.com/saigyujikingyo-png/gpu-nci/pull/4),
+[offline CLI and native worker](https://github.com/saigyujikingyo-png/gpu-nci/pull/5),
+[independent e2e tests](https://github.com/saigyujikingyo-png/gpu-nci/pull/6),
+[reader allocation reservations](https://github.com/saigyujikingyo-png/gpu-nci/pull/7).
+PR #5 depends on #7; its isolated branch does not contain the reservation API.
+Local combined builds explicitly use all four frozen checkouts. Standalone PR
+CI is not a substitute for that combined evidence. Approval should integrate
+#7, #5 and #6 into #4, then verify the integrated tree before merging #4 to main.
 
 AI-assisted development: Claude Opus 5.5 max authored the initial CPU core;
 GPT-6.1 Sol implemented the independent oracle, input reader and bounded
 follow-up fixes; GPT-6 Astra handled architecture and independent review.
-Claude also reviewed the reader. There is no model or network dependency at
+Claude also reviewed the reader and authored its allocation reservations at
+Opus 5.5 xhigh. Sol authored the offline CLI, native worker and independent e2e
+tests; Astra defined the protocol and independently reviewed the frozen changes.
+There is no model or network dependency at
 scientific runtime. No unauthorized group data was used.
 
 `RESEARCH_HANDOFF.md` remains deferred until a real end-to-end scientific case

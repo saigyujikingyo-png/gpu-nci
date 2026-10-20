@@ -2,9 +2,9 @@
 
 The reader, CPU field evaluator and independent oracle passed combined synthetic
 checks and were merged with user approval; see [acceptance status](status.md).
-The offline CLI and native adapter are being implemented under the
-[versioned integration protocol](cli-contract.md). The GPU NCI backend remains
-planned.
+The offline CLI and native adapter pass combined synthetic checks under the
+[versioned integration protocol](cli-contract.md); their independent branches
+await merge approval. The GPU NCI backend remains planned.
 
 ```mermaid
 flowchart LR
@@ -46,7 +46,7 @@ flowchart LR
 The reader type and C descriptor are separate interfaces. The native
 adapter must explicitly transfer Z-fastest storage, inverse/transpose conventions
 and metadata; the existence of both libraries alone is not pipeline integration.
-The [adapter contract](adapter-contract.md) defines that next M1 gate.
+The [adapter contract](adapter-contract.md) defines the tested M1 connection.
 
 ## Offline execution and receipt
 

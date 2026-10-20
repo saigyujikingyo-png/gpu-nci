@@ -4,8 +4,9 @@ An experimental, offline density-grid NCI evaluator: strict CUBE input,
 FP64 fourth-order finite differences, and Cartesian Hessian eigenvalues.
 
 Development order: independent CPU validation → OpenMP → OpenACC →
-profile-guided CUDA only if justified. The first CPU libraries passed combined
-synthetic validation and have been merged; the offline CLI is in development.
+profile-guided CUDA only if justified. The CPU libraries are merged. The offline
+CPU CLI passed combined synthetic validation in three compiler configurations;
+its reviewed implementation branches await merge approval.
 See [current status](docs/status.md).
 **No GPU NCI backend, scientific reproduction, or speedup is claimed.**
 
