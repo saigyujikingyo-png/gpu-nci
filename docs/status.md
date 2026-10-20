@@ -12,13 +12,13 @@ Updated 2026-10-20.
 | Independent numerical oracle | Merged PR #1, actual-library PASS | 113 passed / 1 documented skip on each of three built libraries |
 | Strict CUBE reader | Merged PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
 | Reader-to-ABI adapter and offline CLI | Merged PR #4/#5/#6/#7, synthetic PASS | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
-| CPU X-slab execution | Contract prepared, implementation pending | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
+| CPU X-slab execution | Review branches implemented, combined synthetic PASS, merge pending | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |
 
-The ABI includes future tile descriptors, while the first CPU milestone only
-supports complete dense grids. Partial layouts must be explicitly rejected.
+Merged main `c77d4ed` supports complete dense grids. The reviewed M2 branches
+extend the same ABI to canonical X slabs; other partial layouts remain rejected.
 Initial results retain scientific-uncertainty flags until independent input
 quantization and grid-convergence information is available.
 
@@ -124,12 +124,60 @@ and unchanged before/after execution. Integrated CI and subsequent
 [main CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39506644743)
 passed. Old worktrees, branches and source evidence remain preserved.
 
+## M2 CPU X-slab synthetic acceptance (unmerged)
+
+Actual execution on 2026-10-20 used four clean revisions, unchanged at entry and
+exit: root `ae80fb929ca5ba12de247a2786117a452ac1e4d6`,
+core `4150f34e5a3a4ca5d45909d1fc48502ee1c1d202`,
+runtime `fcbecff3ef1de8a4979636ccd1f49b874c0166f4`,
+tests `30917d3e368fef5fc3163d4e769aa5e4c3484dc5`.
+Subsequent documentation-only commits do not change the tested source code.
+
+| Configuration | CTest passed / skipped | CLI e2e passed / skipped | Oracle passed / skipped |
+|---|---:|---:|---:|
+| GNU Fortran 13.3 Debug | 18 / 0 | 84 / 0 | 285 / 1 |
+| GNU Fortran 13.3 Release | 18 / 0 | 84 / 0 | 285 / 1 |
+| NVHPC 26.9 Debug, CPU | 16 / 1 | 84 / 0 | 285 / 1 |
+
+Every configuration also passed 46 CLI protocol and 21 real native-driver
+checks. All configure/build/CTest processes exited 0, with exact source/build
+declarations and preserved binary hashes, raw logs, exit codes and synthetic
+outputs. The oracle skip is the unchanged public Jacobi-injection hook; native
+FP64 convergence tests ran. NVHPC's unavailable-binary128 skip remains explicit;
+GNU ran both quad-reference tests. No new slab integration test was skipped.
+
+The fixtures verify same-build full-grid/slab equality of finite binary64 bits,
+NaN masks, flags, aggregate stats and raw CLI output hashes. Coverage includes
+all eight periodic-axis combinations, skew geometry, B=1/odd/nondivisor/Nx,
+short tails, Nx=5, 1/2/4-thread consistency, seam/corner negatives, halo aliases,
+checked arithmetic, remote invalid-density preflight, exact tracked budgets,
+completed boundary-only slabs and numeric failures. Independent mathematical
+oracle tolerances are unchanged. These are finite synthetic checks, not a
+full-domain proof, scientific sign certification or scaling measurement.
+
+Independent Astra review closed core, runtime and tests. Two test-coverage
+findings were corrected before production integration: the remote invalid
+sample is outside the first halo, and overflow cases isolate the overflowing
+X extent without an unrelated Y/Z or short-capacity rejection. The earlier
+53-pass/317-skip fixture-only preparation is not counted as actual acceptance.
+
+The C ABI structure, exported symbols, numerical evaluator, 61-point stencil,
+thresholds and uncertainty policy are unchanged. The CLI retains the full rho
+array and buffers only one slab's additional input and output fields. This is
+not out-of-core input and its tracked allocation allowance is not a whole-process
+RSS cap. Main remains unchanged until the reviewed branches are approved for
+merge. OpenMP scaling, GPU-NCI fields, real-density acceptance and speedup remain
+NOT_RUN. Reproduction commands are in [integration](integration.md).
+
 AI-assisted development: Claude Opus 5.5 max authored the initial CPU core;
 GPT-6.1 Sol implemented the independent oracle, input reader and bounded
 follow-up fixes; GPT-6 Astra handled architecture and independent review.
 Claude also reviewed the reader and authored its allocation reservations at
 Opus 5.5 xhigh. Sol authored the offline CLI, native worker and independent e2e
 tests; Astra defined the protocol and independently reviewed the frozen changes.
+For M2, Claude Opus 5.5 max authored the CPU slab core and native tests; separate
+GPT-6.1 Sol agents authored the runtime and independent fixtures. Astra froze
+the contract, reviewed the three branches and verified the combined results.
 There is no model or network dependency at
 scientific runtime. No unauthorized group data was used.
 

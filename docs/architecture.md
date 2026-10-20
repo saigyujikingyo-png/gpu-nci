@@ -4,8 +4,9 @@ The reader, CPU field evaluator and independent oracle passed combined synthetic
 checks and were merged with user approval; see [acceptance status](status.md).
 The offline CLI and native adapter pass combined synthetic checks under the
 [versioned integration protocol](cli-contract.md) and are merged. CPU X-slab
-support is specified in the [M2 contract](slab-contract.md); implementation and
-acceptance are pending. The GPU NCI backend remains planned.
+support follows the [M2 contract](slab-contract.md) and passes combined synthetic
+checks in separate review branches, pending merge. The GPU NCI backend remains
+planned.
 
 ```mermaid
 flowchart LR
@@ -61,10 +62,13 @@ flowchart LR
     Manifest --> Success[SUCCESS contains manifest hash]
 ```
 
-The CLI exclusively creates a new output directory. The worker's full-grid
+The CLI exclusively creates a new output directory. The worker's tracked
 arrays are covered by a checked allocation budget before the reader allocates
 density. This accounting includes output fields, diagnostics, atom data, CPU
 neighbor tables and an explicit allowance; it is not a whole-process RSS cap.
+The reviewed M2 scheduler supports full-grid or sequential X-slab execution.
+It keeps the complete density and buffers one slab's halo and output fields,
+then appends fields in global order. It does not provide out-of-core input.
 The actual origin and axis vectors must equal the declared binary64 geometry.
 The worker retains all flags and invalid-point NaNs. Python checks the closed
 files without loading all field arrays, then writes the success marker last.
@@ -88,9 +92,10 @@ information exists. See [numerics](numerics.md) and [ABI](abi.md).
 ## Build and release boundary
 
 GNU and NVIDIA Fortran always use separate module/build directories. CPU
-configuration works without the NVIDIA SDK. The initial ABI accepts complete
-dense grids and explicitly rejects partial tiles; later slab support must retain
-global periodic wrapping and mixed-derivative corner halos.
+configuration works without the NVIDIA SDK. The unchanged ABI supports complete
+dense grids and, in the reviewed M2 backend, canonical X slabs with complete Y/Z.
+Other partial layouts remain unsupported. Global periodic wrapping and
+mixed-derivative corner halos are covered by independent finite fixtures.
 
 Independent worktrees can be compiled together through root CMake source-path
 options. That is a validation operation, not a Git merge or release. Small

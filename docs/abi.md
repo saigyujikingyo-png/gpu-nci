@@ -6,7 +6,7 @@ options 40 bytes, tile 280 bytes, stats 88 bytes. Fortran must verify
 
 Options and tile version/size must match exactly; reserved fields must be zero.
 CPU only in this milestone. FULL requires null grad/hess and zero corresponding
-capacities; DIAGNOSTIC requires both pointers and capacities >= 3N / 6N.
+capacities; DIAGNOSTIC requires both pointers and capacities >= 3Nout / 6Nout.
 `rho_min` is finite positive; negative tolerance is finite nonnegative.
 `omp_threads` is 1..16; libraries must not change global OpenMP settings.
 
@@ -16,10 +16,17 @@ valid allocated pointers and their declared capacities; the library validates
 nullability and declared lengths, not arbitrary address validity. Contexts are
 used by one caller at a time, and destroyed exactly once.
 
-Initial CPU implementation accepts complete grids only:
+The original complete-grid layout remains supported:
 tile start/input origin = 0, tile count/input shape = global dimensions,
-strides = [Ny*Nz,Nz,1]. Partial/slab layouts return UNSUPPORTED without writes.
-Each dimension is >=5. Multiplication/offset overflow must be checked before
+strides = [Ny*Nz,Nz,1]. The reviewed M2 backend also accepts canonical X slabs
+specified in [slab-contract](slab-contract.md), with complete Y/Z and an explicit
+periodic or clipped finite X halo. Other layouts return UNSUPPORTED without writes.
+Nin=product(input_shape) includes supplied halo samples; Nout=product(tile_count)
+counts output points. Rho capacity and its read/alias range use Nin; field/flags
+capacities and stats use Nout. Input preflight covers all Nin supplied values.
+The runtime must validate the complete original density before its first slab.
+Each global dimension is >=5; a slab may have B=1 and a shorter finite-edge
+input X extent. Multiplication/offset overflow must be checked before
 mapping pointers. J inverse is row-major, finite, invertible, and has 2-norm
 condition <=1000. Periodic values are 0/1 and use N independent samples.
 

@@ -48,3 +48,29 @@ stub-worker CLI tests alone are not integration evidence. Use a fresh build
 directory per compiler/configuration and preserve failures. An omitted build
 revision is reported as UNKNOWN. Build metadata is a declaration, not a signed
 attestation of the source-to-binary relationship.
+
+For M2 use the root's merged reader and additionally bind the separate core and
+independent oracle. The exact accepted revisions are in [status](status.md):
+
+```sh
+cmake -S /path/to/root -B build-m2-debug -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DNCI_BUILD_TEST_HOOKS=ON \
+  -DNCI_CPU_SOURCE_DIR=/path/to/core/src/backend_cpu \
+  -DNCI_DRIVER_SOURCE_DIR=/path/to/runtime/src/driver \
+  -DNCI_CLI_DIR=/path/to/runtime/cli \
+  -DNCI_CLI_TEST_DIR=/path/to/runtime/tests/cli \
+  -DNCI_ORACLE_DIR=/path/to/tests \
+  -DNCI_E2E_DIR=/path/to/tests/tests/e2e \
+  -DNCI_BUILD_REVISION="root:<SHA>;core:<SHA>;runtime:<SHA>;tests:<SHA>" \
+  -DPython3_EXECUTABLE=/path/to/venv/bin/python
+cmake --build build-m2-debug --parallel 2
+ctest --test-dir build-m2-debug -V
+```
+
+Use separate fresh directories for GNU Release and NVHPC CPU Debug. Require
+the new slab tests to be collected, all CLI/native/e2e checks to run without
+skips, and only the documented unavailable public Jacobi-hook oracle skip.
+NVHPC additionally records the unavailable binary128 CTest skip; GNU runs the
+quad-reference checks. The current M2 tests require 46 CLI, 21 native-driver,
+84 end-to-end and 285 oracle passes per configuration. These counts include
+fixture checks and are not a count of independent scientific experiments.

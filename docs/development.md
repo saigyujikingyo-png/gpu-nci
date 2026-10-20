@@ -5,7 +5,9 @@ tests passed combined synthetic checks and review; PRs #1, #2 and #3 were merged
 with user approval on 2026-10-20. The adapter and offline CLI now pass combined
 synthetic checks under the [frozen integration protocol](cli-contract.md), and
 PRs #4/#5/#6/#7 were merged after approval and integrated-tree verification.
-M2 CPU X-slab work follows the [layout and scheduling contract](slab-contract.md).
+M2 CPU X-slab code and thread-consistency checks pass combined synthetic
+validation in review branches under the [layout and scheduling contract](slab-contract.md).
+Their merge is pending; OpenMP scaling measurements are NOT_RUN.
 See [acceptance status](status.md) for the actual test boundary.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
@@ -20,12 +22,12 @@ CPU implementation and independent tests are developed in separate branches.
 Draft PRs are review artifacts; branch merge requires the user's confirmation.
 The root checkout is the single-writer architecture/integration checkout.
 
-The merged M1 libraries provide the reader and field evaluation. The next M1
-integration passes the explicit metadata-to-ABI connection and tiny synthetic
-CLI end-to-end tests in GNU Debug/Release and NVHPC CPU Debug. It preserves source
+The merged M1 libraries and CLI provide the reader, field evaluation and explicit
+metadata-to-ABI connection. Tiny synthetic end-to-end tests pass in GNU
+Debug/Release and NVHPC CPU Debug. The reviewed M2 branches add full-grid/slab
+equivalence under the same configurations. The implementation preserves source
 declarations, units, Z-fastest order and matrix conventions, without authenticating
-the input's scientific provenance. Full-grid/slab work is the next development
-step. OpenMP scaling measurements
+the input's scientific provenance. OpenMP scaling measurements
 still require a bounded manual package; thread consistency tests establish no
 speedup conclusion.
 

@@ -10,6 +10,11 @@ checks below do not establish that overall acceptance. It has **no real-density 
 classification it reports concerns implementation roundoff only; it never
 certifies a scientific sign (bit 6 is always set on valid points).
 
+The reviewed M2 extension adds canonical X slabs under the unchanged ABI;
+see [slab contract](slab-contract.md) and [slab implementation](cpu-slab.md).
+The numerical policy below is unchanged. Its original local-test record is
+historical; current combined acceptance is in [status](status.md).
+
 ## Build and artefacts
 
 | Target | Content |
@@ -83,8 +88,9 @@ written before the preflight succeeds):
 | `global_n[d] < 5`, `periodic[d] ∉ {0,1}` | `INVALID_ARGUMENT` |
 | `Nx·Ny·Nz` or `48·N` byte extent overflows int64 (checked multiplication) | `INVALID_ARGUMENT` |
 | `tile_count < 1`, `tile_start < 0`, start+count > global, `input_shape < 1` | `INVALID_ARGUMENT` |
-| anything but start/origin 0, count/shape = global, strides `[Ny·Nz, Nz, 1]` | `UNSUPPORTED` |
-| `rho/field/flags_capacity < N`; DIAGNOSTIC `grad < 3N`, `hess < 6N` | `INVALID_ARGUMENT` |
+| input end, product(input_shape), or 8*Nin overflows int64 | `INVALID_ARGUMENT` |
+| layout other than legacy full grid or canonical X slab; strides other than `[Ny·Nz, Nz, 1]` | `UNSUPPORTED` |
+| `rho_capacity < Nin`; `field/flags_capacity < Nout`; DIAGNOSTIC `grad < 3Nout`, `hess < 6Nout` | `INVALID_ARGUMENT` |
 | `j_inv` non-finite, singular, κ₂ > 1000 or unverifiable | `INVALID_ARGUMENT` |
 | overlapping byte ranges among rho (read) and all written buffers incl. errbuf | `INVALID_ARGUMENT` |
 | preflight: any NaN/±Inf, or any rho < −negative_tolerance | `INVALID_INPUT` |
@@ -323,7 +329,8 @@ OpenMP-disabled build).
 
 - Overall independent-oracle/combined-build acceptance and any freezing of τ
   margins are recorded in root [status](status.md) and the linked PR evidence.
-- Only complete grids; slabs/tiles/halos return `UNSUPPORTED` (M2).
+- Complete grids and canonical X slabs in the reviewed M2 backend; partial
+  Y/Z and noncanonical halo/stride layouts remain `UNSUPPORTED`.
 - RDG uses libm `cbrt`: values may differ by about one ulp across libm
   implementations (no sign role).
 - The rounding model assumes IEEE binary64 round-to-nearest, gradual underflow
