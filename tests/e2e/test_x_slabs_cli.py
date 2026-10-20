@@ -19,6 +19,17 @@ def slab_budget(shape, block, mode, threads=1, atom_bytes=0):
             + 8192 + atom_bytes + 65536 + 4096*threads)
 
 
+def remote_bad_fixture(bad):
+    field = fourier_fixture()
+    location = (3, field.rho.shape[1]-1, field.rho.shape[2]-1)
+    # Nx7, periodic X, first B1 slab: global planes [5,6,0,1,2].
+    # The bad sample must not be visible to a buggy first-slab-only preflight.
+    first_halo = [(x % field.rho.shape[0]) for x in range(-2, 3)]
+    assert location[0] not in first_halo
+    field.rho[location] = bad
+    return field, location
+
+
 def as_slabs(path, card, block):
     card["compute"].update(layout="x_slabs", slab_planes=block)
     write_card(path, card)
@@ -189,8 +200,7 @@ def test_real_slab_cli_budget_overflow_is_card_failure(executables, tmp_path, sh
 
 @pytest.mark.parametrize("bad", [float("nan"), -1e-3])
 def test_remote_bad_density_rejected_before_first_slab_output(executables, tmp_path, bad):
-    field = fourier_fixture()
-    field.rho[-1, -1, -1] = bad
+    field, _ = remote_bad_fixture(bad)
     _, cube, path, card = write_case(tmp_path, field)
     as_slabs(path, card, 1)
     completed, output = invoke(executables, tmp_path, cube, path)

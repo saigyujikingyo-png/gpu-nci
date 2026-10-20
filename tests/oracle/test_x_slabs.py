@@ -210,24 +210,11 @@ def test_alias_reaches_final_halo_not_just_output_extent(library, name):
 def test_extreme_extent_rejected_in_isolated_process(library, mutation):
     code = r'''
 import os, sys
-import numpy as np
 from reference.abi import Library, INVALID_ARGUMENT, UNSUPPORTED
-from slab_cases import slab
+from slab_cases import extreme_case
 from test_x_slabs import assert_rejected
-case = slab(np.ones((7,9,11)), 3, 1, (True,True,True))
 kind = sys.argv[1]
-if kind in ('start_min','count_min','origin_min','shape_min'):
-    name = dict(start_min='tile_start', count_min='tile_count', origin_min='input_origin', shape_min='input_shape')[kind]
-    getattr(case.tile, name)[0] = -(2**63)
-elif kind == 'global_overflow':
-    case.tile.global_n[:] = (2**62+1, 8, 5)
-elif kind == 'global_byte_limit':
-    case.tile.global_n[:] = (2**54, 5, 5)
-elif kind == 'input_overflow':
-    case.tile.input_shape[0] = 2**63-1
-else:
-    case.tile.global_n[:] = (2**63-1, 5, 5)
-    case.tile.tile_count[0] = 2**63-2
+case = extreme_case(kind)
 expected = UNSUPPORTED if kind == 'origin_min' else INVALID_ARGUMENT
 assert_rejected(Library(os.environ['NCI_LIBRARY']), case, expected)
 '''

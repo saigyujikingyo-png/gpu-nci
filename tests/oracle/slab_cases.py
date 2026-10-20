@@ -85,3 +85,27 @@ def assert_reference(case, rho, grad, hess, periodic, rho_min=1e-8):
 
 def descriptor_bytes(case):
     return ct.string_at(ct.byref(case.tile), ct.sizeof(case.tile))
+
+
+def extreme_case(kind):
+    """Tiny backing arrays; change only the target extent of a legal slab."""
+    shape = (7, 8, 5) if kind in ("global_overflow", "input_overflow") else (7, 5, 5)
+    case = slab(np.ones(shape), 3, 1, (True, True, True))
+    if kind in ("start_min", "count_min", "origin_min", "shape_min"):
+        name = dict(start_min="tile_start", count_min="tile_count",
+                    origin_min="input_origin", shape_min="input_shape")[kind]
+        getattr(case.tile, name)[0] = -(2**63)
+    elif kind == "global_overflow":
+        case.tile.global_n[0] = 2**62 + 1
+    elif kind == "global_byte_limit":
+        case.tile.global_n[0] = 2**54
+    elif kind == "input_overflow":
+        # (2**62+1)*8*5 wraps to +40, below the real rho capacity 200.
+        # An unchecked product cannot be rejected merely as a short capacity.
+        case.tile.input_shape[0] = 2**62 + 1
+    elif kind == "halo_overflow":
+        case.tile.global_n[0] = 2**63 - 1
+        case.tile.tile_count[0] = 2**63 - 2
+    else:
+        raise ValueError(kind)
+    return case

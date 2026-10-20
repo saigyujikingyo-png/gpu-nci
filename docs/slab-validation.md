@@ -51,7 +51,11 @@ FD4 implementation and NCI reference. The C binding is the existing public-only
 - Isolated child processes check INT64_MIN start/count/origin/shape, overflowing
   global and input products, the retained global N*48 limit, and huge halo/count
   arithmetic. Actual backing arrays remain tiny; child failure or timeout fails
-  the test. No huge allocation is requested by the test harness.
+  the test. Overflow fixtures first construct a legal 7x8x5 or 7x5x5 slab and
+  change only the target X extent. Global/input product overflow uses
+  `(2**62+1)*8*5`, which wraps to positive 40 and fits the actual capacities;
+  a short-capacity or unrelated Y/Z-layout rejection cannot substitute for
+  detecting that overflow. No huge allocation is requested by the test harness.
 
 Malformed bounds, capacities and overflow expect INVALID_ARGUMENT; well-formed
 unsupported layouts (including negative stride and noncanonical INT64_MIN input
@@ -61,7 +65,10 @@ Y-partial, preserving its negative purpose and assertion.
 
 `tests/oracle/test_slab_packing.py` separately selfchecks every packed plane,
 global/local descriptors, input/output capacities, copied storage and complete
-partition coverage without loading a production library.
+partition coverage without loading a production library. Six additional review
+selfchecks verify that the overflow fixtures mutate only the target X extent,
+that wrapped products fit the actual tiny backing capacities, and that the
+global byte-limit case fits int64 in points but exceeds it in N*48 bytes.
 
 ## Real CLI coverage
 
@@ -80,8 +87,10 @@ and native driver, subprocesses, independent CUBE authoring and strict receipts:
 - Grid/product and slab reservation overflow fail before worker execution.
   The test oracle uses unbounded Python integer arithmetic, selfchecked separately
   in `tests/e2e/test_slab_fixture_math.py`.
-- NaN and significantly negative density in the final global corner fail whole
-  input preflight before any raw output, despite B=1.
+- NaN and significantly negative density at (3,8,10) fail whole input preflight
+  before any raw output, despite B=1. This point lies outside the entire first
+  periodic-X input halo [5,6,0,1,2]; two pure selfchecks require that all those
+  first-input samples remain finite and positive.
 - Entirely invalid global output retains ABI3 and aggregated stats without
   SUCCESS. A true numeric failure stops at the first ABI4 slab, reports global
   npoints and stats for the first 75 evaluated points, and cannot publish SUCCESS.
@@ -95,12 +104,16 @@ appear in deliberately malformed descriptors/cards rejected before allocation.
 ## Verification and later integration
 
 The dedicated WSL Python is `/opt/gpu-nci-dev-20261020/bin/python` in
-Ubuntu-24.04. With NCI_LIBRARY/NCI_DRIVER/NCI_CLI unset, the final preparation run
-was:
+Ubuntu-24.04. The original freeze at
+`e5471105375c086b36065031d6463b4b480ab549` passed 45 pure checks, with 317
+absent-production integration skips. Following two independent Astra P2 review
+findings, the remote-preflight and overflow fixtures were isolated as described
+above. With NCI_LIBRARY/NCI_DRIVER/NCI_CLI explicitly removed from the subprocess
+environment, the reviewed preparation run was:
 
 ```text
 python -m pytest -q tests/oracle tests/e2e
-45 passed, 317 skipped
+53 passed, 317 skipped
 ```
 
 The 317 skips are honest absent-production integration cases, not acceptance.
