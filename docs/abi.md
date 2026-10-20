@@ -25,6 +25,10 @@ condition <=1000. Periodic values are 0/1 and use N independent samples.
 
 Points are CUBE Z-fastest. Gradients are point-major xyz; Hessians are
 point-major xx,yy,zz,xy,xz,yz. Numeric routines and flags obey numerics.md.
+In DIAGNOSTIC mode, every point with any of bits 0--4 set also has all three
+gradient and all six Hessian entries set to NaN. Low-density Hessian exploration
+mentioned in the design is a separate future diagnostic interface, not an
+exception to this v1 output rule.
 Input preflight rejects nonfinite rho or rho < -negative_tolerance.
 These failures and invalid descriptors leave field buffers untouched.
 If computation fails at a valid point, complete flags/stats and return
