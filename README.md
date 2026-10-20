@@ -20,7 +20,7 @@ ctest --test-dir build --output-on-failure
 Small synthetic tests are development checks. Real-density calculations
 and benchmarks require a separately frozen, bounded execution package.
 
-See [development plan](docs/development.md), [ABI contract](docs/abi.md),
+See [architecture](docs/architecture.md), [development plan](docs/development.md), [ABI contract](docs/abi.md),
 [numerical specification](docs/numerics.md), and [C header](include/nci_api.h).
 External programs are references, not bundled dependencies.
 
