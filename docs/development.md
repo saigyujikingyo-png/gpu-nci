@@ -1,7 +1,9 @@
 # Development sequence
 
-M0 environment preparation is verified. M1 implementation is under independent
-review; see [acceptance status](status.md) for the actual test boundary.
+M0 environment preparation is verified. The first M1 libraries and independent
+tests passed combined synthetic checks and review in separate draft PRs.
+Integration awaits user confirmation; the adapter and CLI remain outstanding.
+See [acceptance status](status.md) for the actual test boundary.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and

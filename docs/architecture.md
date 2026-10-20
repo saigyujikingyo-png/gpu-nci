@@ -1,7 +1,8 @@
 # Architecture and implementation boundaries
 
-This is the target data flow. The reader and independent oracle are implemented
-in separate draft PRs; CPU field evaluation is under development. A complete
+This is the target data flow. The reader, CPU field evaluator and independent
+oracle are implemented in separate draft PRs and passed combined synthetic
+checks; see [acceptance status](status.md). A complete
 end-to-end command-line application and GPU NCI backend are not yet available.
 
 ```mermaid
