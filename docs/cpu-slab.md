@@ -2,9 +2,12 @@
 
 Status: the CPU backend implements the canonical X slabs of the
 [M2 slab contract](slab-contract.md) under the unchanged C ABI v1. It is
-**implemented and passes its own small synthetic native tests**. Independent
-oracle/e2e acceptance, the runtime scheduler and integrated CLI runs are tracked
-separately by the root. There is **no real-density acceptance, no GPU offload
+**implemented and passes its own small synthetic native tests**. Root's combined
+validation of frozen core `4150f34`, runtime `fcbecff3`, tests `30917d3` and
+root `ae80fb9` also passed in GNU Debug/Release and NVHPC CPU Debug: 84 e2e and
+285 oracle passes per configuration, with the one existing public-hook oracle
+skip. See the root integration branch's [status](status.md). Merge is pending.
+There is **no real-density acceptance, no GPU offload
 and no performance measurement**; 1/2/4-thread equality is a consistency check,
 not a scaling result. The header, `nci_abi` types, exported symbols, options,
 formulas, thresholds and eigen policy are unchanged.
@@ -61,8 +64,9 @@ exact 61-point stencil and `point_eval` are used for every layout; no slab
 formula exists. BOUNDARY uses the global coordinates `(s+i, y, z)`; outputs are
 local dense Z-fastest `p = (i*Ny + y)*Nz + z` with point-major gradient/Hessian.
 Stats count only the `Nout` output points, so halo planes are never counted.
-Results of a slab are bitwise identical to the corresponding planes of the
-complete grid because every output point reads the same samples.
+Each output point reads the same samples as its full-grid counterpart. The
+finite validation fixtures produce bitwise-identical full/slab values within
+each tested build; this is not a full-domain proof or a cross-compiler guarantee.
 
 Statuses are unchanged: a completed boundary-only or low-only slab returns
 `INVALID_INPUT` (3) with all fields NaN, flags and stats populated
@@ -134,13 +138,15 @@ run here; joint acceptance is performed by the root.
 
 ## Known dependencies and limitations
 
-- The independent oracle's `test_initial_complete_grid_rejects_partial_layout`
+- The original independent oracle's `test_initial_complete_grid_rejects_partial_layout`
   cases `tile_start` and `tile_count` describe finite X slabs whose clipped
   halo is the whole `5x7x9` grid. They are canonical supported slabs now and
-  return `NCI_OK`, so those two old expectations fail until the separately
-  owned adaptation to still-unsupported partial-Y layouts lands.
-- `cpu-core.md`, `abi.md` and `status.md` still describe complete grids only;
-  they are owned by other authors/the root.
+  return `NCI_OK`. The separately reviewed tests branch preserves the negative
+  checks using unsupported Y layouts and supplies the new positive X tests.
+  Those changes are required for combined CI; this core branch alone retains
+  the old oracle and does not represent the integrated source tree.
+- The root integration branch updates `cpu-core.md`, `abi.md` and `status.md`;
+  these sibling changes are not yet merged into this branch.
 - The first runtime keeps the complete density in memory (not out of core).
   Partial Y/Z tiles, padded layouts, GPU execution and performance are out of
   scope.
