@@ -190,6 +190,11 @@ Before success, require worker exit 0, valid native receipt and statistics,
 correct field byte sizes/hashes, unchanged input snapshot and binaries. Validate
 integer statistics (nonnegative, counts <= N, union valid+invalid=N) without
 loading complete result arrays. Tests independently inspect actual field values.
+Successful receipts also require native.state=`completed`,
+0 < valid <= N, total=npoints=N, numeric_failures=bit_counts[4]=0,
+each of bits 0..4 counts <= invalid, bit_counts[5] <= valid, and
+bit_counts[6]=valid (the current backend marks scientific uncertainty at every
+valid point). These small-JSON checks reject contradictory success receipts.
 Then publish completed_numerical manifest and create `SUCCESS` exclusively,
 containing the final manifest SHA-256 followed by newline. CLI exits 0 only then.
 
