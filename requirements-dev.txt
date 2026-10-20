@@ -1,0 +1,6 @@
+# Verified isolated development environment; Python 3.12.
+cmake==4.1.2
+ninja==1.13.0
+numpy==2.3.4
+scipy==1.16.2
+pytest==8.4.2
