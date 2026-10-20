@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # CPU-core tests (added by src/backend_cpu/CMakeLists.txt when BUILD_TESTING).
-# Every grid is synthetic and at most 17^3 points; nothing here is a
-# scientific run or a benchmark.
+# Every allocated grid is synthetic and at most 17^3 points (test_slabs also
+# declares a 2^40-plane global X extent but allocates only six planes);
+# nothing here is a scientific run or a benchmark.
 
 add_library(nci_core_test_util STATIC core_test_util.c)
 target_link_libraries(nci_core_test_util PUBLIC nci_contract)
@@ -24,6 +25,8 @@ endfunction()
 # Black-box tests through the public C ABI of the production shared library.
 nci_core_c_test(test_contract)
 nci_core_c_test(test_fields)
+# M2 canonical X slabs against the complete grid (docs/slab-contract.md).
+nci_core_c_test(test_slabs)
 find_package(Threads)
 if(Threads_FOUND)
   nci_core_c_test(test_concurrency)
