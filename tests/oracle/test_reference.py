@@ -81,18 +81,48 @@ def test_periodic_symbols_match_independent_rolled_stencil():
     assert_allclose(actual_h, hess, atol=1e-12, rtol=1e-10)
 
 
-def test_exact_stencil_and_negative_mask():
+@pytest.mark.parametrize("location", [(8, 8, 8), (0, 0, 0)])
+def test_exact_stencil_and_negative_mask(location):
     offsets = stencil_offsets()
     assert len(offsets) == 61
     assert (2, 2, 0) in offsets
     assert (2, 2, 2) not in offsets
     rho = np.ones((17, 17, 17))
-    rho[8, 8, 8] = -1e-12
+    rho[location] = -1e-12
     flags = input_flags(rho, periodic=(True, True, True))
     assert np.count_nonzero(flags & STENCIL) == 61
-    assert flags[8, 8, 8] == NONPOSITIVE | STENCIL
-    assert flags[10, 10, 8] == STENCIL
-    assert flags[10, 10, 10] == 0
+    assert flags[location] == NONPOSITIVE | STENCIL
+    corner2 = tuple((np.array(location) - [2, 2, 0]) % 17)
+    corner3 = tuple((np.array(location) - [2, 2, 2]) % 17)
+    assert flags[corner2] == STENCIL
+    assert flags[corner3] == 0
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_near_zero_polynomial_fixture_resolves_both_signs(sign):
+    h = np.diag([-1e-7, sign * 1e-13, 1e-7])
+    rho, _, _ = quadratic((9, 9, 9), np.eye(3), h,
+                          origin=[-4, -4, -4], offset=1e-4)
+    _, discrete_hess = fd4(rho, np.eye(3))
+    center = discrete_hess[2:-2, 2:-2, 2:-2].reshape(-1, 3, 3)
+    middle = np.array([eigvalsh(matrix, driver="evr")[1] for matrix in center])
+    assert np.all(np.sign(middle) == sign)
+    assert_allclose(middle, sign * 1e-13, atol=5e-19, rtol=0)
+
+
+def test_condition_fixtures_discriminate_spectral_from_infinity_norm():
+    assert_allclose(np.linalg.cond(np.diag([1., 1, 1/999]), 2), 999)
+    assert_allclose(np.linalg.cond(np.diag([1., 1, 1/1001]), 2), 1001)
+    shear = np.array([[1., 31, 0], [0, 1, 0], [0, 0, 1]])
+    assert 960 < np.linalg.cond(shear, 2) < 965
+    assert np.linalg.cond(shear, np.inf) == 1024
+
+
+def test_overflow_fixture_would_evade_a_wrapped_capacity_check():
+    product = (2**62 + 1) * 8 * 5
+    assert product > 2**63 - 1
+    assert product % 2**64 == 40
+    assert 40 < 125 and 3 * 40 < 375 and 6 * 40 < 750
 
 
 def test_zero_and_low_are_not_invalid_stencil_samples():

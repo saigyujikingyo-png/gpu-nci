@@ -109,6 +109,39 @@ def test_bad_tile_or_insufficient_capacity_is_untouched(library, field, value):
     assert case.unchanged(before)
 
 
+@pytest.mark.parametrize("field", ["rho_capacity", "field_capacity", "flags_capacity",
+                                  "grad_capacity", "hess_capacity"])
+def test_each_capacity_required_minus_one(library, field):
+    case = Evaluation(np.ones((5, 7, 9)))
+    setattr(case.tile, field, getattr(case.tile, field) - 1)
+    before = case.snapshot()
+    with library.context() as handle:
+        status, _ = library.run(handle, case)
+    assert status == INVALID_ARGUMENT
+    assert case.unchanged(before)
+
+
+@pytest.mark.parametrize("field", ["grad_capacity", "hess_capacity"])
+def test_diagnostic_capacity_is_component_count_not_point_count(library, field):
+    case = Evaluation(np.ones((5, 7, 9)))
+    setattr(case.tile, field, case.rho.size)
+    before = case.snapshot()
+    with library.context() as handle:
+        status, _ = library.run(handle, case)
+    assert status == INVALID_ARGUMENT
+    assert case.unchanged(before)
+
+
+def test_spectral_condition_1001_rejected(library):
+    case = Evaluation(np.ones((5, 5, 5)))
+    case.tile.j_inv[:] = np.diag([1., 1, 1/1001]).ravel()
+    before = case.snapshot()
+    with library.context() as handle:
+        status, _ = library.run(handle, case)
+    assert status == INVALID_ARGUMENT
+    assert case.unchanged(before)
+
+
 @pytest.mark.parametrize("which", ["periodic", "minimum_dimension", "singular",
                                   "ill_conditioned", "nan_j", "inf_j"])
 def test_bad_grid_descriptor(library, which):
@@ -179,7 +212,9 @@ def test_preflight_density_rejection_without_writes(library, bad_rho):
 
 
 def test_overflow_rejected_in_isolated_process(library):
-    # Declared capacities are zero: no claimed allocation of a gigantic grid.
+    # Real allocations stay at 125 points, 375 gradient and 750 Hessian elements.
+    # Unchecked int64 product wraps to 40, which would fit those capacities:
+    # this catches overflow itself instead of short-circuiting on capacity=0.
     # Separate process makes an implementation crash/timeout a clear failed test.
     root = Path(__file__).resolve().parents[2]
     code = """
@@ -188,13 +223,13 @@ import numpy as np
 from reference.abi import Evaluation, Library, options, INVALID_ARGUMENT
 lib = Library(os.environ['NCI_LIBRARY'])
 case = Evaluation(np.ones((5,5,5)))
-huge = 2**62
-case.tile.global_n[:] = (huge, huge, huge)
-case.tile.tile_count[:] = (huge, huge, huge)
-case.tile.input_shape[:] = (huge, huge, huge)
-case.tile.input_strides[:] = (huge, huge, 1)
-case.tile.rho_capacity = case.tile.field_capacity = case.tile.flags_capacity = 0
-case.tile.grad_capacity = case.tile.hess_capacity = 0
+huge_shape = (2**62 + 1, 8, 5)
+case.tile.global_n[:] = huge_shape
+case.tile.tile_count[:] = huge_shape
+case.tile.input_shape[:] = huge_shape
+case.tile.input_strides[:] = (40, 5, 1)
+assert case.tile.rho_capacity == case.tile.field_capacity == case.tile.flags_capacity == 125
+assert case.tile.grad_capacity == 375 and case.tile.hess_capacity == 750
 before = case.snapshot()
 with lib.context(options()) as handle:
     status, error = lib.run(handle, case)

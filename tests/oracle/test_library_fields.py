@@ -22,6 +22,10 @@ def check_flags_stats(case, expected, record_property):
         if field is not None:
             assert np.all(np.isnan(field[~valid]))
             assert np.all(np.isfinite(field[valid]))
+    # This identity uses the ACTUAL returned eigenvalue, even inside its
+    # uncertainty band. A label must never silently zero the raw scalar.
+    assert_array_equal(case.signedrho[valid],
+                       np.sign(case.lambda2[valid]) * case.rho[valid])
     stats = case.stats
     assert stats.total_points == case.rho.size
     assert stats.valid_points == np.count_nonzero(valid)
@@ -37,13 +41,16 @@ def check_flags_stats(case, expected, record_property):
 
 
 def check_numeric(case, grad, hess, valid):
-    assert_allclose(case.grad[valid], grad[valid], atol=1e-12, rtol=1e-10)
-    assert_allclose(case.hess[valid], pack_hessian(hess)[valid], atol=1e-12, rtol=1e-10)
+    if case.grad is not None:
+        assert_allclose(case.grad[valid], grad[valid], atol=1e-12, rtol=1e-10)
+    if case.hess is not None:
+        assert_allclose(case.hess[valid], pack_hessian(hess)[valid], atol=1e-12, rtol=1e-10)
     rdg, signedrho, lambda2 = nci(case.rho[valid], grad[valid], hess[valid])
     assert_allclose(case.rdg[valid], rdg, atol=1e-11, rtol=1e-9)
     assert_allclose(case.lambda2[valid], lambda2, atol=1e-12, rtol=1e-10)
-    # Mathematical raw sign is unstable near a zero eigenvalue; do not assert
-    # raw signedrho there. No numerical error tolerance is enlarged.
+    # Reference-versus-actual sign is a different question from the raw identity
+    # above. This fixed 1e-9 band is a fixture comparison rule, not a production
+    # confidence claim; no numerical error tolerance is enlarged.
     away_from_zero = np.abs(lambda2) > 1e-9
     assert_array_equal(case.signedrho[valid][away_from_zero], signedrho[away_from_zero])
 
@@ -86,21 +93,23 @@ def test_skew_quadratic_cartesian_and_z_fastest(library, left_handed, spectrum,
     assert_array_equal(case.rho, rho)
 
 
+@pytest.mark.parametrize("mode", [FULL, DIAGNOSTIC])
 @pytest.mark.parametrize("periodic", [(True, True, True), (True, False, True)])
-def test_periodic_trig_discrete_fourier_symbols(library, periodic, record_property):
+def test_periodic_trig_discrete_fourier_symbols(library, periodic, mode, record_property):
     rho, grad, hess = periodic_fourier((9, 11, 13), SKEW,
         [(0.1, (1, 2, 1), 0.2), (0.08, (2, -1, 0), -0.4)])
-    case = Evaluation(rho, SKEW, periodic)
-    with library.context() as handle:
+    case = Evaluation(rho, SKEW, periodic, mode=mode)
+    with library.context(options(mode=mode)) as handle:
         status, error = library.run(handle, case)
     assert status == OK, error
     valid = check_flags_stats(case, input_flags(rho, periodic), record_property)
     check_numeric(case, grad, hess, valid)
 
 
-def test_allowed_negative_exact_61_point_mask(library, record_property):
+@pytest.mark.parametrize("location", [(8, 8, 8), (0, 0, 0)])
+def test_allowed_negative_exact_61_point_mask(library, location, record_property):
     rho = np.ones((17, 17, 17))
-    rho[8, 8, 8] = -5e-12
+    rho[location] = -5e-12
     periodic = (True, True, True)
     case = Evaluation(rho, periodic=periodic)
     with library.context(options(negative_tolerance=1e-10)) as handle:
@@ -108,10 +117,84 @@ def test_allowed_negative_exact_61_point_mask(library, record_property):
     assert status == OK, error
     valid = check_flags_stats(case, input_flags(rho, periodic), record_property)
     assert np.count_nonzero(case.flags & STENCIL) == 61
-    assert case.flags[10, 10, 8] & STENCIL
-    assert not case.flags[10, 10, 10] & STENCIL
+    corner2 = tuple((np.array(location) - [2, 2, 0]) % 17)
+    corner3 = tuple((np.array(location) - [2, 2, 2]) % 17)
+    assert case.flags[corner2] & STENCIL
+    assert not case.flags[corner3] & STENCIL
     grad, hess = fd4(rho, np.eye(3))
     check_numeric(case, grad, hess, valid)
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_near_zero_lambda_keeps_nonzero_raw_signedrho(library, sign, record_property):
+    # +/-1e-13 lies below the nominal 1e-12 uncertainty floor, but well above
+    # density-rounding noise for this small exact polynomial. Neither eigenvalue
+    # nor signedrho may be deliberately hard-zeroed inside an uncertainty band.
+    h = np.diag([-1e-7, sign * 1e-13, 1e-7])
+    rho, grad, hess = quadratic((9, 9, 9), np.eye(3), h,
+                                origin=[-4, -4, -4], offset=1e-4)
+    case = Evaluation(rho)
+    with library.context() as handle:
+        status, error = library.run(handle, case)
+    assert status == OK, error
+    valid = check_flags_stats(case, input_flags(rho), record_property)
+    check_numeric(case, grad, hess, valid)
+    assert np.all(np.sign(case.lambda2[valid]) == sign)
+    assert np.all(np.abs(case.lambda2[valid]) < 1e-12)
+    assert_array_equal(case.signedrho[valid], sign * rho[valid])
+
+
+@pytest.mark.parametrize("spectrum", [(-0.2, -0.2, 0.5), (-0.5, 0.2, 0.2)])
+def test_repeated_eigenvalues(library, spectrum, record_property):
+    q, _ = np.linalg.qr(np.array([[1., 2, -1], [3, 1, 2], [2, -2, 3]]))
+    h = q @ np.diag(spectrum) @ q.T
+    rho, grad, hess = quadratic((7, 9, 11), SKEW, h)
+    case = Evaluation(rho, SKEW)
+    with library.context() as handle:
+        status, error = library.run(handle, case)
+    assert status == OK, error
+    valid = check_flags_stats(case, input_flags(rho), record_property)
+    check_numeric(case, grad, hess, valid)
+
+
+@pytest.mark.parametrize("inverse", [np.diag([1., 1, 1/999]),
+                                    np.array([[1., 31, 0], [0, 1, 0], [0, 0, 1]])],
+                         ids=["spectral-condition-999", "spectral-963-infinity-1024"])
+def test_spectral_condition_supported_cases(library, inverse, record_property):
+    assert np.linalg.cond(inverse, 2) < 1000
+    case = Evaluation(np.ones((5, 5, 5)))
+    case.tile.j_inv[:] = inverse.ravel()
+    with library.context() as handle:
+        status, error = library.run(handle, case)
+    assert status == OK, error
+    check_flags_stats(case, input_flags(case.rho), record_property)
+
+
+def test_openmp_threads_preserve_nontrivial_fields_flags_and_stats(library, record_property):
+    # Correctness only: no clocks, scaling ratios or performance assertions.
+    rho, grad, hess = periodic_fourier((9, 11, 13), SKEW,
+        [(0.1, (1, 2, 1), 0.2), (0.08, (2, -1, 0), -0.4)])
+    periodic = (True, True, True)
+    expected_flags = input_flags(rho, periodic)
+    baseline = None
+    for threads in (1, 4, 16):
+        case = Evaluation(rho, SKEW, periodic)
+        with library.context(options(threads=threads)) as handle:
+            status, error = library.run(handle, case)
+        assert status == OK, (threads, error)
+        valid = check_flags_stats(case, expected_flags, record_property)
+        check_numeric(case, grad, hess, valid)
+        record_property(f"omp_{threads}_valid_points", int(np.count_nonzero(valid)))
+        if baseline is None:
+            baseline = case
+            continue
+        assert_array_equal(case.flags, baseline.flags)
+        assert bytes(case.stats) == bytes(baseline.stats)
+        for field in ("grad", "hess", "lambda2"):
+            assert_allclose(getattr(case, field), getattr(baseline, field),
+                            atol=1e-12, rtol=1e-10)
+        assert_allclose(case.rdg, baseline.rdg, atol=1e-11, rtol=1e-9)
+        assert_array_equal(case.signedrho, baseline.signedrho)
 
 
 def test_zero_low_threshold_and_uncropped_neighbors(library, record_property):
