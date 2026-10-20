@@ -32,7 +32,7 @@ root checkout. Add the independently owned worker, CLI and tests as follows:
 cmake -S /path/to/root -B build-cli-integration -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DNCI_BUILD_TEST_HOOKS=ON \
   -DNCI_IO_SOURCE_DIR=/path/to/adapter/src/io \
-  -DNCI_DRIVER_SOURCE_DIR=/path/to/adapter/src/driver \
+  -DNCI_DRIVER_SOURCE_DIR=/path/to/cli/src/driver \
   -DNCI_CLI_DIR=/path/to/cli/cli \
   -DNCI_CLI_TEST_DIR=/path/to/cli/tests/cli \
   -DNCI_E2E_DIR=/path/to/e2e/tests/e2e \
