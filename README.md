@@ -5,7 +5,8 @@ FP64 fourth-order finite differences, and Cartesian Hessian eigenvalues.
 
 Development order: independent CPU validation → OpenMP → OpenACC →
 profile-guided CUDA only if justified. The first CPU libraries passed combined
-synthetic validation in separate draft PRs; see [current status](docs/status.md).
+synthetic validation and have been merged; the offline CLI is in development.
+See [current status](docs/status.md).
 **No GPU NCI backend, scientific reproduction, or speedup is claimed.**
 
 ## Build

@@ -1,9 +1,10 @@
 # Architecture and implementation boundaries
 
-This is the target data flow. The reader, CPU field evaluator and independent
-oracle are implemented in separate draft PRs and passed combined synthetic
-checks; see [acceptance status](status.md). A complete
-end-to-end command-line application and GPU NCI backend are not yet available.
+The reader, CPU field evaluator and independent oracle passed combined synthetic
+checks and were merged with user approval; see [acceptance status](status.md).
+The offline CLI and native adapter are being implemented under the
+[versioned integration protocol](cli-contract.md). The GPU NCI backend remains
+planned.
 
 ```mermaid
 flowchart LR
@@ -34,14 +35,41 @@ flowchart LR
   nor alter the input density.
 - `reference` and `tests/oracle` own independent expectations. They may read the
   public header but must not import production routines to generate truth.
-- Later CLI/cache/scheduler modules will connect these components and manage
-  frozen execution cards. No LLM, network service or model credential is a
-  runtime dependency of the scientific program.
+- `cli/nci_cli.py` owns strict JSON execution cards, immutable input snapshots,
+  source hashes, child-process timeout and final receipts. It uses the Python
+  standard library; it does not parse density values or implement derivatives.
+- `src/driver` owns the Fortran reader-to-C-ABI bridge. It reads a small internal
+  namelist, reserves storage before reading the grid, transfers metadata and
+  geometry explicitly, and writes raw arrays and a native status record.
+  No LLM, network service or model credential is a runtime dependency.
 
-The current reader type and C descriptor are separate interfaces. A future
-adapter must explicitly transfer Z-fastest storage, invert/transpose conventions
+The reader type and C descriptor are separate interfaces. The native
+adapter must explicitly transfer Z-fastest storage, inverse/transpose conventions
 and metadata; the existence of both libraries alone is not pipeline integration.
 The [adapter contract](adapter-contract.md) defines that next M1 gate.
+
+## Offline execution and receipt
+
+```mermaid
+flowchart LR
+    Card[Strict JSON card] --> Snap[Hash-checked CUBE snapshot]
+    Snap --> Worker[Fortran worker and public C ABI]
+    Worker --> Raw[Raw fields and native status]
+    Raw --> Check[Exit, sizes, hashes and counts]
+    Check --> Manifest[Final numerical manifest]
+    Manifest --> Success[SUCCESS contains manifest hash]
+```
+
+The CLI exclusively creates a new output directory. The worker's full-grid
+arrays are covered by a checked allocation budget before the reader allocates
+density. This accounting includes output fields, diagnostics, atom data, CPU
+neighbor tables and an explicit allowance; it is not a whole-process RSS cap.
+The actual origin and axis vectors must equal the declared binary64 geometry.
+The worker retains all flags and invalid-point NaNs. Python checks the closed
+files without loading all field arrays, then writes the success marker last.
+Failed or interrupted outputs remain inspectable and cannot be mistaken for
+an accepted scientific result. An accepted numerical run still has unknown
+scientific uncertainty.
 
 ## Numerical boundary
 
