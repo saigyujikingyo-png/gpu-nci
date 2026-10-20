@@ -9,9 +9,9 @@ Updated 2026-10-20.
 | Isolated Python toolchain | Verified | Python 3.12.3; pinned development requirements; pip check |
 | C ABI layout | PASS | 1 CTest, options=40 / tile=280 / stats=88 bytes |
 | CPU numerical implementation | In progress | Separate Claude implementation branch |
-| Independent numerical oracle | In progress | Separate GPT reference-test branch |
-| Strict CUBE reader | In progress | Separate GPT input branch |
-| OpenACC SDK and device | Preparing | No offload acceptance yet |
+| Independent numerical oracle | Draft PR #1 | Reference-only: 19 passed, 88 skipped; actual library not yet tested |
+| Strict CUBE reader | Draft PR #2 | Joint build CTest 3/3; read-only review found no blockers |
+| OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |
 
