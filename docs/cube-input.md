@@ -16,6 +16,10 @@ type(cube_read_limits) :: limits
 ! 调用方可以在读取前缩小资源预算。max_bytes/max_points 必须为正。
 limits%max_bytes = 268435456_8
 limits%max_points = 33554432_8
+! 可选：为后续分配预留字节（默认0，非负），计入同一 max_bytes。
+limits%reserve_bytes_per_point = 0_8
+limits%reserve_bytes_per_axis_node = 0_8
+limits%reserve_fixed_bytes = 0_8
 call read_cube('input.cube', grid, status, limits)
 ! status%code /= CUBE_OK 时不能使用 grid；输出已清理。
 ! read_cube 成功仅代表严格格式及几何校验成功。
@@ -95,6 +99,15 @@ internal READ 的溢出检测。合法 int64 MIN/MAX 与任意256字符内的前
 两个上界独立并同时生效，以更严格者为准；默认 max_points 不是承诺恰好该点数
 连同扫描块及原子数组仍能装入默认 max_bytes。
 调高预算需自行承担资源责任。ALLOCATE 使用 STAT，不以分配错误终止宿主。
+
+调用方可在 `cube_read_limits` 中声明三项 int64 预留：
+`reserve_bytes_per_point*N + reserve_bytes_per_axis_node*(Nx+Ny+Nz) + reserve_fixed_bytes`，
+与上述 `8*N + atom字节 + 8192` 相加后同 `max_bytes` 比较。三项默认0，旧调用方
+（含两分量位置构造 `cube_read_limits(max_bytes, max_points)`）行为不变。
+检查在 header 解析后、分配 atoms/rho 之前进行：任一预留为负返回
+`CUBE_MEMORY_LIMIT`；乘积、逐轴求和或总和超出 int64 返回 `CUBE_OVERFLOW`；
+总和超过 `max_bytes` 返回 `CUBE_MEMORY_LIMIT`。预留只是记账，本模块不分配它们，
+也不改变密度数据；仍不是 RSS 硬上限。
 失败后不保留可误用的部分数组。读取前后重查文件长度，但没有来源内容哈希验证，
 同长度的并发修改不在本模块可检测范围。
 
@@ -160,6 +173,11 @@ conversion iostat 错误则为code5；两者均失败且清理输出。
 `18446744073709551621`（2^64+5）的 NATOMS/dim/NVAL，以及255位远超界数和
 256字符内合法前导零。此前 NVHPC 对超界整数 internal READ 不报告错误并绕回的
 缺陷已通过不使用整数 internal READ 修复；此处只证明合成输入层可移植性。
+
+分配预留扩展仅在 WSL gfortran 13.3 Debug 下复验（NVHPC 未复跑）：`cube_input`
+两项 CTest 通过，生命周期17项断言、33组合成测试（165次 probe 调用）。新增用例覆盖
+零默认与旧预算精确边界、各预留项的精确边界、仅有 header 时在原子记录/分配前拒绝、
+负值，以及逐项乘法、逐轴求和与总和加法的 int64 溢出。
 
 尚未实现：JSON 输入卡读写、来源 SHA-256/授权/producer 验证、单位转换、多场/轨道
 adapter、重复端点去除、自动补核、电子数积分诊断、真实 producer 兼容验收、C 入口、

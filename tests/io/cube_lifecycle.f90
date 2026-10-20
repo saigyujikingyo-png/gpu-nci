@@ -6,6 +6,7 @@ program cube_lifecycle
   type(cube_grid) :: grid
   type(cube_metadata) :: metadata
   type(cube_status) :: status
+  type(cube_read_limits) :: limits
   character(len=4096) :: path
   integer :: unit,checks=0
   call get_command_argument(1,path)
@@ -44,6 +45,11 @@ program cube_lifecycle
   call check(.not.grid%structurally_valid.and.grid%npoints==0_int64,'failure clears previous metadata')
   call read_cube(trim(path),grid,status)
   call check(status%code==CUBE_OK,'reuse after failure')
+  limits=cube_read_limits(9192_int64,125_int64)
+  call check(all([limits%reserve_bytes_per_point,limits%reserve_bytes_per_axis_node, &
+    limits%reserve_fixed_bytes]==0_int64),'legacy positional limits keep zero reservations')
+  call read_cube(trim(path),grid,status,limits)
+  call check(status%code==CUBE_OK,'legacy exact byte and point budget')
   call clear_cube(grid)
   call clear_cube(grid)
   call check(.not.allocated(grid%rho).and..not.grid%structurally_valid,'idempotent clear')

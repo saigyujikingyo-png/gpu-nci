@@ -103,7 +103,9 @@ The private executable invocation is:
 Python writes real values with 17 significant digits and Fortran-compatible
 exponents. Only validated enums enter quoted namelist strings. The worker
 validates its own protocol and values. It compares actual shape exactly and
-actual origin/J elementwise within 16*epsilon*max(1,abs(actual),abs(declared)).
+actual origin/J elementwise by parsed binary64 numerical equality. The 17-digit
+namelist serialization round-trips these declarations. No absolute epsilon
+floor is permitted: it could hide a factor-of-two change to a very small J.
 It validates metadata using the same negative tolerance passed to the ABI.
 
 Reader limits gain nonnegative int64 reservations (default zero, preserving
@@ -140,7 +142,9 @@ object with `total`, `valid`, `invalid`, `numeric_failures`, `bit_counts` array
 of seven integers). Success requires abi_status=0 and valid+invalid=total=N.
 Numerical failure (ABI status 4) may retain raw diagnostics for inspection but
 must exit nonzero, state failed, and never produce SUCCESS. Expected boundary
-and low-density masks alone are not failed evaluation. Invalid source/metadata,
+and low-density masks do not fail evaluation when at least one valid point
+remains. A zero-valid-point field follows the existing ABI status 3 and fails
+without SUCCESS. Invalid source/metadata,
 memory, numerical and IO failures have distinguishable stage/message fields.
 
 `nci_driver --build-info` emits one JSON object to stdout, then exits 0, with
@@ -162,11 +166,37 @@ Write `manifest.json` with schema_version=1, state `running`, `failed`, or
 explicit grid/metadata/compute/limits/source declarations, build info and binary
 fingerprints, worker return code, native receipt and output file sizes/hashes.
 Unknown scientific uncertainty is recorded; success is numerical completion only.
+The exact top-level manifest keys are `schema_version`, `state`, `stage`,
+`message`, `card`, `input`, `grid`, `metadata`, `compute`, `limits`, `source`,
+`build`, `build_probe`, `binaries`, `worker`, `native`, `settings`, `outputs`, `scientific`.
+`card` is `{path,sha256,bytes}`; `input` adds `snapshot:"input.cube"` to those
+keys. `grid/metadata/compute/limits/source` retain the card declarations.
+`build` is the build-info object; `build_probe` records
+`{returncode,timed_out,timeout_seconds}` (null before the probe).
+`binaries` has `driver` and `backend_library`
+objects, each `{path,sha256,bytes}`. `worker` is
+`{returncode,timed_out,timeout_seconds}`; `native` is the native receipt;
+`settings` is `{path:"settings.nml",sha256,bytes}`. Unknown objects on failure
+are null; `outputs` starts as an empty object. `scientific` is
+`{certified:false,uncertainty:"unknown",completion:"numerical_only"}`.
+`outputs` is indexed by filename; entries have `sha256`, `bytes`,
+`dtype` (`float64` or `uint8`), `byte_order` (`little`), `shape`
+([Nx,Ny,Nz] or [Nx,Ny,Nz,3/6]), `component_order`, `unit`, `point_order`
+(`z_fastest`), `storage_order` (`point_major`). Component arrays are
+`[rdg]`, `[lambda2]`, `[signedrho]`, `[flag_byte]`, `[gx,gy,gz]`, or
+`[xx,yy,zz,xy,xz,yz]`. Units are dimensionless for RDG/flags,
+electron/bohr^3 for signedrho, electron/bohr^4 for gradients and
+electron/bohr^5 for lambda2/Hessian.
 Manifest replacements are atomic and limited to this newly owned directory.
 Before success, require worker exit 0, valid native receipt and statistics,
 correct field byte sizes/hashes, unchanged input snapshot and binaries. Validate
 integer statistics (nonnegative, counts <= N, union valid+invalid=N) without
 loading complete result arrays. Tests independently inspect actual field values.
+Successful receipts also require native.state=`completed`,
+0 < valid <= N, total=npoints=N, numeric_failures=bit_counts[4]=0,
+each of bits 0..4 counts <= invalid, bit_counts[5] <= valid, and
+bit_counts[6]=valid (the current backend marks scientific uncertainty at every
+valid point). These small-JSON checks reject contradictory success receipts.
 Then publish completed_numerical manifest and create `SUCCESS` exclusively,
 containing the final manifest SHA-256 followed by newline. CLI exits 0 only then.
 

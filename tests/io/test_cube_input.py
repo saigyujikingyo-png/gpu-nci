@@ -37,16 +37,18 @@ def fixture(*, shape=(5, 5, 5), natoms=0, origin=(0, 0, 0),
 class CubeInputTests(unittest.TestCase):
     counter = 0
 
-    def parse(self, text, mode="none", budget=None, points=None):
+    def parse(self, text, mode="none", budget=None, points=None, reserve=None):
         CubeInputTests.counter += 1
         path = FIXTURES / f"synthetic_{CubeInputTests.counter:04d}.cube"
         path.write_bytes(text.encode("ascii"))
         original_hash = hashlib.sha256(path.read_bytes()).digest()
         args = [str(PROBE), str(path), mode]
-        if budget is not None or points is not None:
+        if budget is not None or points is not None or reserve is not None:
             args.append(str(268435456 if budget is None else budget))
-        if points is not None:
-            args.append(str(points))
+        if points is not None or reserve is not None:
+            args.append(str(33554432 if points is None else points))
+        if reserve is not None:
+            args.extend(map(str, reserve))
         result = subprocess.run(args, text=True, capture_output=True, timeout=10, check=True)
         self.assertEqual(hashlib.sha256(path.read_bytes()).digest(), original_hash,
                          "Native parser modified its synthetic input file")
@@ -203,6 +205,47 @@ class CubeInputTests(unittest.TestCase):
         self.rejected(fixture(), MEMORY, budget=0)
         self.rejected(fixture(), MEMORY, points=-1)
         self.assertEqual(int(self.parse(fixture(), points=125)["STATUS"]), OK)
+
+    def test_reservation_zero_default_keeps_legacy_budget(self):
+        # Legacy 5x5x5 budget is exactly 8*125 rho + 0 atom + 8192 scanner bytes.
+        for reserve in [None, (0, 0, 0)]:
+            with self.subTest(reserve=reserve):
+                self.assertEqual(int(self.parse(fixture(), budget=9192, reserve=reserve)["STATUS"]), OK)
+                self.rejected(fixture(), MEMORY, budget=9191, reserve=reserve)
+
+    def test_reservation_exact_budget_boundary(self):
+        # Non-cubic grid separates N=210 from Nx+Ny+Nz=18; legacy base is 8*210+8192.
+        text = fixture(shape=(5, 6, 7), values=["1"] * 210)
+        for reserve in [(3, 0, 0), (0, 7, 0), (0, 0, 11), (3, 7, 11)]:
+            total = 8 * 210 + 8192 + reserve[0] * 210 + reserve[1] * 18 + reserve[2]
+            with self.subTest(reserve=reserve):
+                self.assertEqual(int(self.parse(text, budget=total, reserve=reserve)["STATUS"]), OK)
+                self.rejected(text, MEMORY, budget=total - 1, reserve=reserve)
+
+    def test_reservation_rejects_header_before_allocation(self):
+        # Header only: without reservations the reader reaches the atom record,
+        # which is read after allocating atoms; reservations must stop it earlier.
+        header = fixture(natoms=1, values=[])
+        self.rejected(header, MISSING)
+        for reserve in [(2**28, 0, 0), (0, 2**28, 0), (0, 0, 2**28)]:
+            with self.subTest(reserve=reserve):
+                self.assertEqual(self.rejected(header, MEMORY, reserve=reserve)["LINE"], "0")
+
+    def test_reservation_negative_rejected(self):
+        for reserve in [(-1, 0, 0), (0, -1, 0), (0, 0, -1), (-2**63, 0, 0)]:
+            with self.subTest(reserve=reserve):
+                self.assertIn("nonnegative", self.rejected(fixture(), MEMORY, reserve=reserve)["MESSAGE"])
+
+    def test_reservation_checked_overflow(self):
+        big = 2**63 - 1  # 5x5x5: N=125, Nx+Ny+Nz=15, legacy base 9192 bytes.
+        for reserve, phrase in [((big // 100, 0, 0), "product"),  # per_point*N
+                                ((0, big // 4, 0), "product"),    # per_axis_node*Nx
+                                ((0, big // 14, 0), "sum"),       # each 5*r fits, 15*r does not
+                                ((big // 125, 0, 0), "Total"),    # base + per_point*N
+                                ((0, big // 15, 0), "Total"),     # ... + per_axis_node*15
+                                ((0, 0, big), "Total")]:          # ... + fixed
+            with self.subTest(reserve=reserve):
+                self.assertIn(phrase, self.rejected(fixture(), OVERFLOW, reserve=reserve)["MESSAGE"])
 
     def test_singular_and_conditioned_grids(self):
         self.rejected(fixture(j=((0, 0, 0), (0, 0, 0), (0, 0, 0))), SINGULAR)
