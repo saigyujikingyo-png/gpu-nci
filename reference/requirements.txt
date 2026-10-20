@@ -1,0 +1,4 @@
+# Validated local synthetic-test environment. No runtime dependency of libnci.
+numpy==2.3.4
+scipy==1.16.2
+pytest==8.4.2
