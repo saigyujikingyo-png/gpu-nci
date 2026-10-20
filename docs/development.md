@@ -3,8 +3,9 @@
 M0 environment preparation is verified. The first M1 libraries and independent
 tests passed combined synthetic checks and review; PRs #1, #2 and #3 were merged
 with user approval on 2026-10-20. The adapter and offline CLI now pass combined
-synthetic checks under the [frozen integration protocol](cli-contract.md), with
-their separate implementation branches awaiting merge approval.
+synthetic checks under the [frozen integration protocol](cli-contract.md), and
+PRs #4/#5/#6/#7 were merged after approval and integrated-tree verification.
+M2 CPU X-slab work follows the [layout and scheduling contract](slab-contract.md).
 See [acceptance status](status.md) for the actual test boundary.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
@@ -23,8 +24,8 @@ The merged M1 libraries provide the reader and field evaluation. The next M1
 integration passes the explicit metadata-to-ABI connection and tiny synthetic
 CLI end-to-end tests in GNU Debug/Release and NVHPC CPU Debug. It preserves source
 declarations, units, Z-fastest order and matrix conventions, without authenticating
-the input's scientific provenance. After review and approved branch integration,
-full-grid/slab work is the next development step. OpenMP scaling measurements
+the input's scientific provenance. Full-grid/slab work is the next development
+step. OpenMP scaling measurements
 still require a bounded manual package; thread consistency tests establish no
 speedup conclusion.
 

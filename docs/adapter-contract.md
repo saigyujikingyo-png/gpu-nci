@@ -1,8 +1,8 @@
 # M1 contract: connect input to field evaluation
 
 The reader, CPU backend and independent oracle are merged. The adapter and CLI
-implement this contract and pass joint synthetic checks on separate branches;
-their merge remains subject to user approval. See [status](status.md) for tested
+implement this contract, pass joint synthetic checks and were merged with user
+approval. See [status](status.md) for tested
 revisions and [cli-contract](cli-contract.md) for the precise execution protocol.
 
 ## Explicit transfer

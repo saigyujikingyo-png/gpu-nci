@@ -3,8 +3,9 @@
 The reader, CPU field evaluator and independent oracle passed combined synthetic
 checks and were merged with user approval; see [acceptance status](status.md).
 The offline CLI and native adapter pass combined synthetic checks under the
-[versioned integration protocol](cli-contract.md); their independent branches
-await merge approval. The GPU NCI backend remains planned.
+[versioned integration protocol](cli-contract.md) and are merged. CPU X-slab
+support is specified in the [M2 contract](slab-contract.md); implementation and
+acceptance are pending. The GPU NCI backend remains planned.
 
 ```mermaid
 flowchart LR

@@ -11,7 +11,8 @@ Updated 2026-10-20.
 | CPU numerical implementation | Merged PR #3, synthetic PASS | Dense-grid FP64 fields, flags, diagnostics and bounded OpenMP; independent review closed |
 | Independent numerical oracle | Merged PR #1, actual-library PASS | 113 passed / 1 documented skip on each of three built libraries |
 | Strict CUBE reader | Merged PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
-| Reader-to-ABI adapter and offline CLI | Synthetic PASS, merge pending | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
+| Reader-to-ABI adapter and offline CLI | Merged PR #4/#5/#6/#7, synthetic PASS | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
+| CPU X-slab execution | Contract prepared, implementation pending | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |
@@ -73,8 +74,8 @@ Review artifacts: [independent tests](https://github.com/saigyujikingyo-png/gpu-
 [CPU core](https://github.com/saigyujikingyo-png/gpu-nci/pull/3).
 All three were merged with user approval on 2026-10-20. Merged main `b1df82c`
 also passed [CPU CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39493005661).
-The new adapter, CLI and end-to-end branches remain separate pending the next
-concrete merge confirmation. Their combined acceptance is recorded below.
+The adapter, CLI and end-to-end branches were subsequently integrated with user
+approval. Their combined and integrated acceptance is recorded below.
 
 ## Offline CPU CLI synthetic acceptance
 
@@ -109,14 +110,19 @@ points and existing output directories. No production formula or acceptance
 tolerance was changed to obtain these passes. Reproduction commands are in
 [integration](integration.md).
 
-Pending review artifacts: [contract/build integration](https://github.com/saigyujikingyo-png/gpu-nci/pull/4),
+Merged review artifacts: [contract/build integration](https://github.com/saigyujikingyo-png/gpu-nci/pull/4),
 [offline CLI and native worker](https://github.com/saigyujikingyo-png/gpu-nci/pull/5),
 [independent e2e tests](https://github.com/saigyujikingyo-png/gpu-nci/pull/6),
 [reader allocation reservations](https://github.com/saigyujikingyo-png/gpu-nci/pull/7).
-PR #5 depends on #7; its isolated branch does not contain the reservation API.
-Local combined builds explicitly use all four frozen checkouts. Standalone PR
-CI is not a substitute for that combined evidence. Approval should integrate
-#7, #5 and #6 into #4, then verify the integrated tree before merging #4 to main.
+User approval was followed in order: #7, dependency update and passing #5 CI,
+then #5/#6, full integrated-tree checks, and #4 into main `c77d4ed`.
+The prior #5 compile failure was caused by the then-unmerged reservation API;
+the failed history is retained. The exact integrated source `8cc25b8` passed
+all 17 GNU Debug CTests using only its own default source paths, including
+37 e2e, 40 CLI unit, 12 native and 113/1 oracle cases. Source state was clean
+and unchanged before/after execution. Integrated CI and subsequent
+[main CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39506644743)
+passed. Old worktrees, branches and source evidence remain preserved.
 
 AI-assisted development: Claude Opus 5.5 max authored the initial CPU core;
 GPT-6.1 Sol implemented the independent oracle, input reader and bounded
