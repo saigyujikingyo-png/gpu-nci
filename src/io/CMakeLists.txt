@@ -1,0 +1,5 @@
+add_library(nci_cube_input STATIC nci_cube_input.f90)
+target_include_directories(nci_cube_input PUBLIC "${CMAKE_Fortran_MODULE_DIRECTORY}")
+if(BUILD_TESTING)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../tests/io" "${CMAKE_CURRENT_BINARY_DIR}/tests")
+endif()
