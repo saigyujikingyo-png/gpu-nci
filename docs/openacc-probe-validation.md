@@ -54,5 +54,74 @@ exit2/NOT_TESTED for an explicitly recorded missing device. All results are
 limited to this finite corpus; runtime launch/transfer evidence and immutable
 binary/input/output/log receipts are required for an executed comparison.
 
-Verifier negative/selfchecks and the exact evidence schema follow in the next
-test-only commit. This fixture freeze alone is not integration acceptance.
+The executed evidence JSON schema is:
+
+```json
+{
+  "schema_version": 1,
+  "state": "executed",
+  "input": {"path": "/absolute/input.m3a1", "sha256": "64 lowercase hex digits", "bytes": 22024},
+  "manifest": {"path": "/absolute/manifest.json", "sha256": "64 lowercase hex digits", "bytes": 57629},
+  "host": {
+    "binary": {"path": "/absolute/host", "sha256": "64 lowercase hex digits", "bytes": 123},
+    "stdout": {"path": "/absolute/host.stdout", "sha256": "64 lowercase hex digits", "bytes": 123},
+    "stderr": {"path": "/absolute/host.stderr", "sha256": "64 lowercase hex digits", "bytes": 0},
+    "returncode": 0,
+    "command": ["/absolute/host", "/absolute/input.m3a1"]
+  },
+  "device": {
+    "binary": {"path": "/absolute/device", "sha256": "64 lowercase hex digits", "bytes": 123},
+    "stdout": {"path": "/absolute/device.stdout", "sha256": "64 lowercase hex digits", "bytes": 123},
+    "stderr": {"path": "/absolute/device.stderr", "sha256": "64 lowercase hex digits", "bytes": 123},
+    "returncode": 0,
+    "command": ["/absolute/device", "/absolute/input.m3a1"]
+  },
+  "device_count": 1,
+  "device_identity": "actual NVIDIA identity recorded by the private runner",
+  "compiler_report": {"path": "/absolute/build.log", "sha256": "64 lowercase hex digits", "bytes": 123},
+  "runtime_evidence": {"path": "/absolute/device.stderr", "sha256": "64 lowercase hex digits", "bytes": 123}
+}
+```
+
+All receipts have exactly path/sha256/bytes; paths are absolute, SHA-256 values
+must be lowercase and sizes/returncodes/device_count must be integers, not bool.
+The command's first argument must resolve to its binary. Output arguments must
+bind to the matching stdout receipt. Runtime evidence must bind to device stderr
+and contain a kernel-launch line plus upload and download messages, for example
+the actual NVHPC `NVCOMPILER_ACC_NOTIFY=3` log. A DEVICE=1 marker alone cannot pass.
+The compiler report is retained and hashed; exact compiler flag, source adapter
+and device identity provenance still require the separate architecture/build
+review. The verifier does not infer those facts from numerical output.
+
+For a missing device, use schema_version1, state `no_device`, device_count0,
+nonempty reason, input and manifest receipts. Omit host/device run objects;
+the runner must not execute either binary. Host/device output arguments may be
+omitted in this case. An attempted nonzero-exit execution is FAILED, not a
+missing-device substitute. Reports are exclusively created. PASS records counts,
+all artifact digests, verifier/evidence digests, scope and raw middle-root sign
+differences; FAILED records its reason and available input/output/log-index
+digests; NOT_TESTED records the missing-device reason. Original files are only
+read and are hashed again after comparison.
+
+Pure development validation:
+
+```text
+python -m pytest -q tests/openacc_probe
+97 passed
+```
+
+These checks use invented protocol output, placeholder files explicitly named
+`not-an-executable` and a synthetic runtime log. Their invented bound is only
+verifier test data. They do not supply native or device acceptance evidence.
+The tests reject malformed records, wrong counts/END/indices/device markers,
+incorrect bit helpers and >1-ULP cbrt, flushed subnormal RDG, hidden NaN/Inf,
+incomplete failure fields, wrong raw sign/status/uncertainty, a device bound/tau
+pair that is self-consistent but differs from host by 1e-5 relative, one-bit tau
+relation drift, missing kernel or transfers, changed binary/input/gates, absent
+device identity/count, unbound runtime evidence and nonzero exits. Separate
+checks retain permitted raw sign differences inside the fixed band and verify
+NOT_TESTED/FAILED exit codes and refusal to overwrite an existing report.
+
+The frozen corpus commit is `ee5489078fa8bcaf8107d7d93b6de09d99ad6cf7`.
+No candidate host/device binary, scientific solver or benchmark was executed by
+this writer. Actual finite probe execution and review remain pending.

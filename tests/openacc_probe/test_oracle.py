@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 import pytest
+import numpy as np
 
 from fixtures import GATES, digest, generate, input_text
 from oracle import (ROOT, SIGN, INF, MAX, ETA, bits, classification,
@@ -75,3 +76,23 @@ def test_generation_is_exclusive_and_deterministic(tmp_path):
         assert (target/name).read_bytes()==(FROZEN/name).read_bytes()
     with pytest.raises(FileExistsError):
         generate(target)
+
+
+def test_frozen_fortran_order_and_finite_input_domains():
+    manifest=json.loads((FROZEN/"manifest.json").read_text())
+    for c in manifest["scalars"]:
+        assert -4096 <= c["shift"] <= 4096
+    for c in manifest["rdg"]:
+        assert all(math.isfinite(value(int(x,16))) for x in c["gradient"])
+        assert math.isfinite(value(int(c["rho"],16))) and value(int(c["rho"],16))>0
+    for c in manifest["points"]:
+        assert c["max_rot"] in (1,30)
+        assert len(c["inverse"])==9 and len(c["block"])==125
+        assert all(math.isfinite(value(int(x,16))) for x in c["inverse"]+c["block"])
+        assert value(int(c["center"],16))>0
+    known=manifest["points"][3]
+    block=np.array([value(int(x,16)) for x in known["block"]]).reshape((5,5,5),order="F")
+    for x,y,z in ((1,0,0),(0,1,0),(0,0,1),(1,-1,2)):
+        assert block[x+2,y+2,z+2] == 20+x*x+y*y+z*z+x*y+x*z+y*z
+    skew=np.array([value(int(x,16)) for x in manifest["points"][2]["inverse"]]).reshape((3,3),order="F")
+    np.testing.assert_array_equal(skew,[[1.,.25,-.125],[.0625,.75,.125],[0.,-.0625,1.25]])
