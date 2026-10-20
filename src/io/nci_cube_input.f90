@@ -29,6 +29,11 @@ module nci_cube_input
     ! Budget includes the density array, atom array and scanner block.
     integer(int64) :: max_bytes=268435456_int64
     integer(int64) :: max_points=33554432_int64
+    ! Optional nonnegative caller reservations for later allocations, charged
+    ! as per_point*N + per_axis_node*(Nx+Ny+Nz) + fixed. Zero keeps the legacy budget.
+    integer(int64) :: reserve_bytes_per_point=0_int64
+    integer(int64) :: reserve_bytes_per_axis_node=0_int64
+    integer(int64) :: reserve_fixed_bytes=0_int64
   end type
   type, public :: cube_grid
     integer(int64) :: natoms=0_int64, shape(3)=0_int64, npoints=0_int64
@@ -337,13 +342,34 @@ contains
     result=a*b
   end subroutine
 
+  subroutine checked_sum(a,b,result,message,status)
+    integer(int64), intent(in) :: a,b
+    integer(int64), intent(out) :: result
+    character(len=*), intent(in) :: message
+    type(cube_status), intent(inout) :: status
+    result=0_int64
+    if (status%code/=CUBE_OK) return
+    if (a<0_int64.or.b<0_int64) then
+      call fail(status,CUBE_OVERFLOW,'Negative allocation length'); return
+    end if
+    if (b>huge(a)-a) then
+      call fail(status,CUBE_OVERFLOW,message); return
+    end if
+    result=a+b
+  end subroutine
+
   subroutine check_budget(grid,limits,status)
     type(cube_grid), intent(inout) :: grid
     type(cube_read_limits), intent(in) :: limits
     type(cube_status), intent(inout) :: status
     type(cube_atom) :: atom_size_probe
     integer(int64) :: count,rho_bytes,atom_bytes,bytes
+    integer(int64) :: term,axis_bytes,partial,total
     integer :: axis
+    if (limits%reserve_bytes_per_point<0_int64.or.limits%reserve_bytes_per_axis_node<0_int64 &
+        .or.limits%reserve_fixed_bytes<0_int64) then
+      call fail(status,CUBE_MEMORY_LIMIT,'Caller allocation reservations must be nonnegative'); return
+    end if
     count=1_int64
     do axis=1,3
       call checked_product(count,grid%shape(axis),bytes,status)
@@ -362,6 +388,20 @@ contains
       call fail(status,CUBE_OVERFLOW,'Total allocation byte count overflows'); return
     end if
     bytes=bytes+atom_bytes
+    call checked_product(limits%reserve_bytes_per_point,count,term,status)
+    call checked_sum(bytes,term,total,'Total allocation byte count overflows',status)
+    ! Per-axis products of nonnegative terms: any partial-sum overflow means the
+    ! exact per_axis_node*(Nx+Ny+Nz) exceeds int64; representable totals pass.
+    axis_bytes=0_int64
+    do axis=1,3
+      call checked_product(limits%reserve_bytes_per_axis_node,grid%shape(axis),term,status)
+      call checked_sum(axis_bytes,term,partial,'Axis-node reservation sum exceeds int64 range',status)
+      axis_bytes=partial
+    end do
+    call checked_sum(total,axis_bytes,bytes,'Total allocation byte count overflows',status)
+    call checked_sum(bytes,limits%reserve_fixed_bytes,total,'Total allocation byte count overflows',status)
+    if (status%code/=CUBE_OK) return
+    bytes=total
     if (count>limits%max_points.or.bytes>limits%max_bytes) &
       call fail(status,CUBE_MEMORY_LIMIT,'Declared grid/atoms exceed caller memory or point budget')
   end subroutine
