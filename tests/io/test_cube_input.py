@@ -167,6 +167,36 @@ class CubeInputTests(unittest.TestCase):
             with self.subTest(text=text[:130]):
                 self.rejected(text, OVERFLOW)
 
+    def test_portable_int64_boundaries_and_wraparound(self):
+        # MIN/MAX are legal integer tokens, even when CUBE semantics reject NVAL.
+        for value in ["9223372036854775807", "+9223372036854775807", "-9223372036854775808"]:
+            with self.subTest(legal_boundary=value):
+                self.rejected(fixture(nval=value), UNSUPPORTED)
+        for value in ["9223372036854775808", "+9223372036854775808", "-9223372036854775809",
+                      "18446744073709551621", "-18446744073709551621",
+                      "9" * 255, "-" + "9" * 255]:
+            for position in ["natoms", "dimension", "nval"]:
+                with self.subTest(value=value, position=position):
+                    if position == "natoms":
+                        text = fixture(natoms=value)
+                    elif position == "dimension":
+                        text = fixture(shape=(value, 5, 5))
+                    else:
+                        text = fixture(nval=value)
+                    self.rejected(text, OVERFLOW)
+        self.rejected(fixture(natoms="-9223372036854775808"), UNSUPPORTED)
+        self.rejected(fixture(shape=("-9223372036854775808", 5, 5)), UNSUPPORTED)
+
+    def test_long_leading_zeros_within_token_limit(self):
+        text = fixture(natoms="+" + "0" * 255, shape=("+" + "0" * 254 + "5", 5, 5),
+                       nval="0" * 255 + "1")
+        result = self.parse(text)
+        self.assertEqual(int(result["STATUS"]), OK)
+        self.assertEqual(result["NATOMS"], "0")
+        self.assertEqual(result["SHAPE"], "5 5 5")
+        self.assertEqual(int(self.parse(fixture(natoms="-" + "0" * 255))["STATUS"]), OK)
+        self.rejected(fixture(natoms="0" * 257), TOKEN_LONG)
+
     def test_explicit_memory_and_point_limits(self):
         self.rejected(fixture(), MEMORY, budget=9000)
         self.rejected(fixture(), MEMORY, points=124)

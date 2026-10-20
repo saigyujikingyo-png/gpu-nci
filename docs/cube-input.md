@@ -68,6 +68,11 @@ metadata 本身由调用方持有，不从注释、文件名、原子电荷或�
 负 NATOMS、多轨道扩展、NVAL 不为1、负轴计数单位扩展、附加字段、缺失样点和
 多余 token 均拒绝。非法尾随非数值 token 仍按“多余 token”拒绝，不悄悄忽略。
 单个 numeric token 最长256字符；超过返回专门错误。注释/数据行没有整行长度上限。
+整数使用逐位负向累加，在乘10及减下一位之前分别校验范围，不依赖编译器
+internal READ 的溢出检测。合法 int64 MIN/MAX 与任意256字符内的前导零支持；
+超出 int64 的正负 token 均拒绝，不能通过模2^64绕回较小计数。
+数据尾的多余 token 若超过256字符，优先返回 `CUBE_TOKEN_TOO_LONG`；
+长度在限内才返回 `CUBE_EXTRA_TOKEN`。
 
 原始样点存于 `grid%rho(:)`，**Z 最快**，0基索引位置 `(ix,iy,iz)` 的 Fortran
 1基位置为 `((ix*Ny)+iy)*Nz+iz+1`。不交换轴、不删端点、不插值、不夹零。
@@ -87,6 +92,8 @@ metadata 本身由调用方持有，不从注释、文件名、原子电荷或�
 分配前以 int64 溢出保护检查维度乘积、density/atom 字节数和总和。
 默认点数上限33,554,432，默认预算256 MiB；预算计入 rho、atom 数组与扫描块，
 不是进程 RSS 的严格上限（运行库、描述符、栈及分配器开销另计）。调用方可降低预算；
+两个上界独立并同时生效，以更严格者为准；默认 max_points 不是承诺恰好该点数
+连同扫描块及原子数组仍能装入默认 max_bytes。
 调高预算需自行承担资源责任。ALLOCATE 使用 STAT，不以分配错误终止宿主。
 失败后不保留可误用的部分数组。读取前后重查文件长度，但没有来源内容哈希验证，
 同长度的并发修改不在本模块可检测范围。
@@ -138,8 +145,9 @@ conversion iostat 错误则为code5；两者均失败且清理输出。
 ## 开发验证与未实现项
 
 本分支在 WSL Ubuntu 24.04 / gfortran 13.3 Debug（`-fcheck=all`、
-`-ffp-contract=off`）构建。CTest 3/3通过：既有C ABI布局、原生Fortran生命周期
-15项断言、26组合成输入测试（110次原生Fortran probe调用）。每个生成fixture
+`-ffp-contract=off`）及独立 NVHPC nvfortran 26.9.0 Debug（`-Kieee -Mnofma`）
+分别构建。两套 CTest 各3/3通过：既有C ABI布局、原生Fortran生命周期
+15项断言、28组合成输入测试（各139次原生Fortran probe调用）。每个生成fixture
 在调用前后核对SHA-256，只证明测试输入未被本次读取改写，不是实际来源认证。
 
 `tests/io` 的 Python 标准库测试只生成小 synthetic CUBE 并调用原生 Fortran probe。
@@ -148,6 +156,10 @@ conversion iostat 错误则为code5；两者均失败且清理输出。
 边界。固定种子几何 oracle 使用旋转保持的已知奇异值，不调用待测 SVD 作真值。
 原生生命周期测试另覆盖失败后重用、前一次metadata标志清理、可变数组被调用方
 改成NaN后的复检、解析失败释放数组与重复clear。
+整数可移植性反例覆盖 `9223372036854775808`、`-9223372036854775809`、
+`18446744073709551621`（2^64+5）的 NATOMS/dim/NVAL，以及255位远超界数和
+256字符内合法前导零。此前 NVHPC 对超界整数 internal READ 不报告错误并绕回的
+缺陷已通过不使用整数 internal READ 修复；此处只证明合成输入层可移植性。
 
 尚未实现：JSON 输入卡读写、来源 SHA-256/授权/producer 验证、单位转换、多场/轨道
 adapter、重复端点去除、自动补核、电子数积分诊断、真实 producer 兼容验收、C 入口、

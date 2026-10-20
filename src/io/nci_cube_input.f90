@@ -190,24 +190,42 @@ contains
     integer(int64), intent(out) :: value
     type(cube_status), intent(inout) :: status
     integer(int64), intent(in) :: line
-    integer :: i,n,ios
+    integer :: i,n,decimal
+    integer(int64) :: lower_limit, multiply_limit, accumulator
+    logical :: negative
     value=0_int64
     if (status%code/=CUBE_OK) return
-    n=len_trim(word); i=1
+    n=len_trim(word); i=1; negative=.false.
     if (n>0) then
-      if (word(1:1)=='+'.or.word(1:1)=='-') i=2
+      negative=(word(1:1)=='-')
+      if (word(1:1)=='+'.or.negative) i=2
     end if
     if (i>n) then
       call fail(status,CUBE_INVALID_INTEGER,'Malformed integer token',line); return
     end if
+    ! Accumulate negatively: int64 MIN has no representable positive magnitude.
+    ! Never rely on internal READ iostat: some compilers wrap overflowing input.
+    lower_limit=-huge(value)
+    if (negative) lower_limit=lower_limit-1_int64
+    multiply_limit=lower_limit/10_int64
+    accumulator=0_int64
     do while(i<=n)
       if (.not.digit(word(i:i))) then
         call fail(status,CUBE_INVALID_INTEGER,'Malformed integer token',line); return
       end if
+      decimal=iachar(word(i:i))-iachar('0')
+      if (accumulator<multiply_limit) then
+        call fail(status,CUBE_OVERFLOW,'Integer token exceeds int64 range',line); return
+      end if
+      accumulator=accumulator*10_int64
+      if (accumulator<lower_limit+int(decimal,int64)) then
+        call fail(status,CUBE_OVERFLOW,'Integer token exceeds int64 range',line); return
+      end if
+      accumulator=accumulator-int(decimal,int64)
       i=i+1
     end do
-    read(word,*,iostat=ios) value
-    if (ios/=0) call fail(status,CUBE_OVERFLOW,'Integer token exceeds int64 range',line)
+    value=accumulator
+    if (.not.negative) value=-accumulator
   end subroutine
 
   subroutine real_value(word,value,status,line)
