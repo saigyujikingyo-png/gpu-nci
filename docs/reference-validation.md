@@ -59,6 +59,12 @@ implementation. If `cc` is unavailable, that probe alone explicitly skips.
   known rotated spectra separately check LAPACK and NumPy. Gaussian analytic
   derivatives are self-checked using complex-step differentiation, independent
   of the production finite differences.
+- The large-finite-RDG range regression evaluates the actual binary64 input
+  stencil with exact Fraction arithmetic, then the defining RDG formula with
+  Decimal and independently computed Machin pi. 80- and 100-digit arithmetic
+  must round to the same finite binary64 reference. It neither imports nor
+  reproduces production exponent/scaling code. The fixture's final RDG is about
+  1.1621759632369338e308, while a binary64 |g|/rho intermediate overflows.
 - Exact input-mask checks include all 61 stencil locations, a two-axis corner,
   exclusion of three-axis corners, permitted small negative samples, exact
   zero, low/threshold-adjacent rho, all-invalid outputs, and proof that positive
@@ -98,8 +104,9 @@ After the Astra review fixes and OpenMP test addition, the no-library command
 completed with **19 passed, 88 skipped**, pytest exit code 0. The public-header
 C layout probe was among the passes. All 88 skips arose because `NCI_LIBRARY`
 was unset, including the optional hook
-test's unavailable-library fixture. No actual production library was evaluated:
-**production CPU core NOT_TESTED**. Once a library is supplied, the hook test
+test's unavailable-library fixture. At that reference-only stage no actual
+production library was evaluated: **production CPU core NOT_TESTED**.
+Once a library is supplied, the hook test
 will still explicitly skip for lack of a standardized public test-only ABI.
 The new ignored XML report is `runs/reference-only-astra-fixes-20261020.xml`.
 
@@ -108,6 +115,16 @@ the no-library self-check completed with **20 passed, 90 skipped**, exit 0.
 All 90 skips are missing actual-library integration, not core passes. Evidence:
 `runs/reference-only-failure-regressions-20261020.xml`. The earlier two XML
 reports remain preserved.
+
+The later range-regression reference-only self-check completed with
+**21 passed, 91 skipped**, exit0, in `runs/reference-only-rdg-intermediate-20261020.xml`.
+The specifically supplied old real library was then tested on this single
+range regression: **1 failed**, exit1, because it returned NUMERIC_FAILURE
+instead of the required finite result. That failure is preserved in
+`runs/old-real-rdg-intermediate-regression-20261020.xml`; it is not marked xfail
+or converted to a skip. A separate private dynamic observation recorded finite
+actual gradient/Hessian, erroneous center bit4, and a 100-digit reference value.
+This targeted real-library failure does not establish overall CPU acceptance.
 
 Execution details and remaining work are recorded in local ignored
 `.agents/handoff.md`. Reference self-tests do not establish production-core

@@ -7,6 +7,8 @@ from reference.abi import (DIAGNOSTIC, FULL, INVALID_INPUT, NUMERIC_FAILURE,
                            OK, Evaluation, options)
 from reference.fields import (INVALID, NUM_UNCERTAIN, SCI_UNCERTAIN, FAILURE,
     STENCIL, input_flags, fd4, nci, pack_hessian, periodic_fourier, quadratic)
+from reference.extreme import (exact_center_derivatives, finite_large_rdg_fixture,
+                               high_precision_rdg)
 
 pytestmark = pytest.mark.integration
 SKEW = np.array([[0.3, 0.05, -0.02], [0.02, 0.24, 0.04], [0, -0.03, 0.2]])
@@ -252,6 +254,29 @@ def test_rdg_overflow_invalidates_all_diagnostic_outputs(library):
     assert case.stats.numeric_failures == 1
     for bit in range(7):
         assert case.stats.bit_counts[bit] == np.count_nonzero(expected_flags & (1 << bit))
+    assert_array_equal(case.rho, rho)
+
+
+def test_large_finite_rdg_avoids_intermediate_overflow(library, record_property):
+    rho = finite_large_rdg_fixture()
+    rational_grad, rational_hess = exact_center_derivatives(rho)
+    expected_rdg = high_precision_rdg(float(rho[2, 2, 2]), rational_grad)
+    record_property("rdg_reference_decimal_100_digits", str(expected_rdg))
+    case = Evaluation(rho)
+    with library.context(options(rho_min=1e-8)) as handle:
+        status, error = library.run(handle, case)
+    # The final result is representable: intermediate overflow is NOT a valid
+    # reason to classify this finite positive-density interior point as failed.
+    assert status == OK, error
+    valid = check_flags_stats(case, input_flags(rho), record_property)
+    assert np.count_nonzero(valid) == 1
+    expected_grad = np.array([float(g) for g in rational_grad])
+    expected_hess = np.array([[float(h) for h in row] for row in rational_hess])
+    assert_allclose(case.grad[2, 2, 2], expected_grad, atol=1e-12, rtol=1e-10)
+    assert_allclose(case.hess[2, 2, 2], pack_hessian(expected_hess),
+                    atol=1e-12, rtol=1e-10)
+    assert_allclose(case.lambda2[2, 2, 2], 0, atol=1e-12, rtol=1e-10)
+    assert_allclose(case.rdg[2, 2, 2], float(expected_rdg), atol=1e-11, rtol=1e-9)
     assert_array_equal(case.rho, rho)
 
 

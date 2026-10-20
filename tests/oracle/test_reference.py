@@ -1,5 +1,7 @@
 """Self-tests of the independent references; do not require libnci."""
 import ctypes as ct
+from decimal import Decimal
+from fractions import Fraction
 import json
 import shutil
 import subprocess
@@ -11,6 +13,8 @@ from numpy.testing import assert_allclose
 from scipy.linalg import eigvalsh
 
 from reference.abi import Options, Tile, Stats
+from reference.extreme import (exact_center_derivatives, finite_large_rdg_fixture,
+                               high_precision_rdg)
 from reference.fields import (BOUNDARY, LOW, NONPOSITIVE, STENCIL, fd4,
                               gaussian, input_flags, pack_hessian,
                               periodic_fourier, quadratic, stencil_offsets,
@@ -138,6 +142,27 @@ def test_rdg_overflow_fixture_has_finite_derivatives_and_nonfinite_rdg():
     with np.errstate(over="ignore", under="ignore", divide="ignore"):
         rdg = np.linalg.norm(grad[center]) / (RDG_DENOMINATOR * rho[center]**(4/3))
     assert np.isinf(rdg)
+
+
+def test_large_rdg_exact_reference_is_finite_despite_binary64_intermediate():
+    rho = finite_large_rdg_fixture()
+    gradient, hessian = exact_center_derivatives(rho)
+    assert gradient == [Fraction(-(2**1018)), Fraction(0), Fraction(0)]
+    assert hessian == [[Fraction(-5, 128), Fraction(0), Fraction(0)],
+                       [Fraction(0), Fraction(0), Fraction(0)],
+                       [Fraction(0), Fraction(0), Fraction(0)]]
+    assert np.all(np.isfinite(rho))
+    flags = input_flags(rho)
+    assert flags[2, 2, 2] == 0
+    assert flags[0, 2, 2] == flags[1, 2, 2] == BOUNDARY | NONPOSITIVE
+    expected100 = high_precision_rdg(Fraction(1, 64), gradient, precision=100)
+    expected80 = high_precision_rdg(Fraction(1, 64), gradient, precision=80)
+    assert float(expected100) == float(expected80)
+    assert Decimal("1.16e308") < expected100 < Decimal("1.17e308")
+    assert np.isfinite(float(expected100))
+    with np.errstate(over="ignore"):
+        naive_intermediate = abs(np.float64(gradient[0])) / rho[2, 2, 2]
+    assert np.isinf(naive_intermediate)
 
 
 def test_zero_and_low_are_not_invalid_stencil_samples():
