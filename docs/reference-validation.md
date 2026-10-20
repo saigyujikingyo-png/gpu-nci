@@ -65,6 +65,13 @@ implementation. If `cc` is unavailable, that probe alone explicitly skips.
   must round to the same finite binary64 reference. It neither imports nor
   reproduces production exponent/scaling code. The fixture's final RDG is about
   1.1621759632369338e308, while a binary64 |g|/rho intermediate overflows.
+- Two public-ABI subnormal regressions construct inputs by uint64 bit views,
+  not platform SCALE/scalbn. Constant rho bits0x10 with rho_min bits0x1 and
+  direct Jinv=diag(1e308) must be accepted, with zero center fields and flag96.
+  The second uses Jinv=I and x-offset -2/+2 bits0x16/0x0A: Fraction gives exactly
+  one minimum-subnormal unit of gradient, zero Hessian, and Decimal supplies a
+  strictly positive finite RDG. Gradient bits must equal0x1; RDG is checked
+  strictly positive with unchanged rtol1e-9 and atol0, never a zero-passing gate.
 - Exact input-mask checks include all 61 stencil locations, a two-axis corner,
   exclusion of three-axis corners, permitted small negative samples, exact
   zero, low/threshold-adjacent rho, all-invalid outputs, and proof that positive
@@ -125,6 +132,19 @@ instead of the required finite result. That failure is preserved in
 or converted to a skip. A separate private dynamic observation recorded finite
 actual gradient/Hessian, erroneous center bit4, and a 100-digit reference value.
 This targeted real-library failure does not establish overall CPU acceptance.
+
+The later frozen pre-wrapper NV/GNU comparison ran only the two subnormal
+regressions: **NV 2 failed**, exit1; **GNU 2 passed**, exit0. NV wrongly rejected
+the large isotropic inverse as singular; for the second case it returned an
+RDG around1.67e91 rather than the independently expected2.35e105 despite a
+correct subnormal gradient. These are actual test results, not forced xfails.
+Private receipts are `runs/subnormal-regressions-old-nvhpc-20261020.xml` and
+`runs/subnormal-regressions-old-gnu-20261020.xml`. This narrow GNU pass does not
+certify the entire core or any GPU offload/performance/scientific result.
+Reference-only self-check after these two additions: **21 passed, 93 skipped**,
+exit0; `runs/reference-only-subnormal-regressions-20261020.xml`. The second NV
+output has exactly the same binary64 mantissa as the rounded reference but an
+exponent lower by47; full-precision private observation is preserved separately.
 
 Execution details and remaining work are recorded in local ignored
 `.agents/handoff.md`. Reference self-tests do not establish production-core

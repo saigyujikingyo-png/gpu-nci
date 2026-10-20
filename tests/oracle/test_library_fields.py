@@ -1,4 +1,6 @@
 """Integration: actual CPU ABI, analytic/Fourier references, tiny grids only."""
+from fractions import Fraction
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
@@ -278,6 +280,62 @@ def test_large_finite_rdg_avoids_intermediate_overflow(library, record_property)
     assert_allclose(case.lambda2[2, 2, 2], 0, atol=1e-12, rtol=1e-10)
     assert_allclose(case.rdg[2, 2, 2], float(expected_rdg), atol=1e-11, rtol=1e-9)
     assert_array_equal(case.rho, rho)
+
+
+def test_subnormal_constant_with_large_isotropic_jinv_is_supported(library, record_property):
+    # Construct binary64 subnormals by bit reinterpretation, never SCALE/scalbn.
+    rho = np.full((5, 5, 5), np.uint64(0x10), dtype=np.uint64).view(np.float64)
+    rho_min = np.array([0x1], dtype=np.uint64).view(np.float64)[0]
+    zero = np.array([0x0], dtype=np.uint64).view(np.float64)[0]
+    case = Evaluation(rho)
+    case.tile.j_inv[:] = np.diag([1e308, 1e308, 1e308]).ravel()
+    opts = options(rho_min=float(rho_min))
+    assert int(case.rho.view(np.uint64)[2, 2, 2]) == 0x10
+    assert int(np.array([opts.rho_min]).view(np.uint64)[0]) == 0x1
+    record_property("rho_binary64_bits", "0x10")
+    record_property("rho_min_binary64_bits", "0x1")
+    with library.context(opts) as handle:
+        status, error = library.run(handle, case)
+    assert status == OK, error
+    expected_inputs = np.ones((5, 5, 5), dtype=np.uint8)
+    expected_inputs[2, 2, 2] = 0
+    check_flags_stats(case, expected_inputs, record_property)
+    expected_flags = expected_inputs.copy()
+    expected_flags[2, 2, 2] = NUM_UNCERTAIN | SCI_UNCERTAIN
+    assert_array_equal(case.flags, expected_flags)
+    for field in (case.rdg, case.signedrho, case.lambda2, case.grad, case.hess):
+        assert_array_equal(field[2, 2, 2], zero)
+    assert_array_equal(case.rho.view(np.uint64), np.full((5, 5, 5), 0x10, dtype=np.uint64))
+
+
+def test_subnormal_gradient_retains_positive_finite_rdg(library, record_property):
+    rho_bits = np.full((5, 5, 5), np.uint64(0x10), dtype=np.uint64)
+    rho_bits[0, 2, 2], rho_bits[4, 2, 2] = 0x16, 0x0A
+    rho = rho_bits.view(np.float64)
+    eta = np.array([0x1], dtype=np.uint64).view(np.float64)[0]
+    rational_grad, rational_hess = exact_center_derivatives(rho)
+    expected_rdg = high_precision_rdg(float(rho[2, 2, 2]), rational_grad)
+    assert rational_grad == [Fraction.from_float(float(eta)), 0, 0]
+    assert all(value == 0 for row in rational_hess for value in row)
+    assert np.isfinite(float(expected_rdg)) and expected_rdg > 0
+    record_property("rdg_reference_decimal_100_digits", str(expected_rdg))
+    case = Evaluation(rho)
+    with library.context(options(rho_min=float(eta))) as handle:
+        status, error = library.run(handle, case)
+    assert status == OK, error
+    expected_inputs = np.ones((5, 5, 5), dtype=np.uint8)
+    expected_inputs[2, 2, 2] = 0
+    check_flags_stats(case, expected_inputs, record_property)
+    assert int(case.grad[2, 2, 2, 0].view(np.uint64)) == 0x1
+    assert_array_equal(case.grad[2, 2, 2, 1:], 0)
+    assert_array_equal(case.hess[2, 2, 2], 0)
+    assert case.lambda2[2, 2, 2] == case.signedrho[2, 2, 2] == 0
+    assert np.isfinite(case.rdg[2, 2, 2]) and case.rdg[2, 2, 2] > 0
+    record_property("actual_rdg_binary64", repr(float(case.rdg[2, 2, 2])))
+    # A normal absolute tolerance would let a spuriously zero result pass when
+    # testing subnormal derivatives. Preserve the fixed relative RDG gate only.
+    assert_allclose(case.rdg[2, 2, 2], float(expected_rdg), atol=0, rtol=1e-9)
+    assert_array_equal(case.rho.view(np.uint64), rho_bits)
 
 
 def test_optional_jacobi_nonconvergence_hook(library):
