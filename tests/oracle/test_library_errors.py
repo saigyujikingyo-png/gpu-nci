@@ -167,10 +167,10 @@ def test_bad_grid_descriptor(library, which):
 def test_initial_complete_grid_rejects_partial_layout(library, which):
     case = Evaluation(np.ones((5, 7, 9)))
     if which == "tile_start":
-        case.tile.tile_start[0] = 1
-        case.tile.tile_count[0] = 4
+        case.tile.tile_start[1] = 1
+        case.tile.tile_count[1] = 6
     elif which == "tile_count":
-        case.tile.tile_count[0] = 4
+        case.tile.tile_count[1] = 6
     elif which == "input_origin":
         case.tile.input_origin[0] = -2
     else:

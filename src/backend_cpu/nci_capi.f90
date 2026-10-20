@@ -156,7 +156,8 @@ contains
     real(dp), target :: no_grad(3, 0), no_hess(6, 0)
     integer(i8), pointer, contiguous :: flags_a(:)
     type(message_t) :: msg
-    integer(i64) :: n, first_bad, n_negative, counts(0:7), p
+    type(tile_layout) :: lay
+    integer(i64) :: nin, nout, first_bad, n_negative, counts(0:7), p, gpoint
     integer(i64) :: lo(9), ext(9)
     logical :: diagnostic, write_msg, periodic(3), is_write(9)
     real(dp) :: m(3, 3)
@@ -229,26 +230,29 @@ contains
         end if
       end if
 
-      call check_tile_geometry(t, diagnostic, n, status, msg)
+      call check_tile_geometry(t, diagnostic, lay, status, msg)
       if (status /= NCI_OK) exit body
       call check_jinv(t%j_inv, status, msg)
       if (status /= NCI_OK) exit body
       status = NCI_INVALID_ARGUMENT
+      ! nin supplied input samples (halo included), nout output points.
+      nin = lay%nin
+      nout = lay%nout
 
       ! Written extents may not overlap each other, the density or errbuf.
       lo = 0
       ext = 0
       is_write = .true.
-      lo(1) = address(rho);       ext(1) = 8*n;  is_write(1) = .false.
-      lo(2) = address(rdg);       ext(2) = 8*n
-      lo(3) = address(signedrho); ext(3) = 8*n
-      lo(4) = address(lambda2);   ext(4) = 8*n
-      lo(5) = address(flags);     ext(5) = n
+      lo(1) = address(rho);       ext(1) = 8*nin;  is_write(1) = .false.
+      lo(2) = address(rdg);       ext(2) = 8*nout
+      lo(3) = address(signedrho); ext(3) = 8*nout
+      lo(4) = address(lambda2);   ext(4) = 8*nout
+      lo(5) = address(flags);     ext(5) = nout
       lo(6) = address(stats);     ext(6) = STATS_V1_BYTES
       nbuf = 6
       if (diagnostic) then
-        lo(7) = address(grad); ext(7) = 24*n
-        lo(8) = address(hess); ext(8) = 48*n
+        lo(7) = address(grad); ext(7) = 24*nout
+        lo(8) = address(hess); ext(8) = 48*nout
         nbuf = 8
       end if
       if (c_associated(errbuf)) then
@@ -268,8 +272,9 @@ contains
         end do
       end do
 
-      call c_f_pointer(rho, rho_a, [n])
-      call preflight_density(n, rho_a, opt%negative_tolerance, int(opt%omp_threads), &
+      ! Every supplied sample, halo included; nothing outside the input is seen.
+      call c_f_pointer(rho, rho_a, [nin])
+      call preflight_density(nin, rho_a, opt%negative_tolerance, int(opt%omp_threads), &
                              first_bad, n_negative)
       if (first_bad /= 0) then
         status = NCI_INVALID_INPUT
@@ -284,14 +289,14 @@ contains
         exit body
       end if
 
-      call c_f_pointer(rdg, rdg_a, [n])
-      call c_f_pointer(signedrho, srho_a, [n])
-      call c_f_pointer(lambda2, lam_a, [n])
-      call c_f_pointer(flags, flags_a, [n])
+      call c_f_pointer(rdg, rdg_a, [nout])
+      call c_f_pointer(signedrho, srho_a, [nout])
+      call c_f_pointer(lambda2, lam_a, [nout])
+      call c_f_pointer(flags, flags_a, [nout])
       call c_f_pointer(stats, st)
       if (diagnostic) then
-        call c_f_pointer(grad, grad_a, [3_i64, n])
-        call c_f_pointer(hess, hess_a, [6_i64, n])
+        call c_f_pointer(grad, grad_a, [3_i64, nout])
+        call c_f_pointer(hess, hess_a, [6_i64, nout])
       else
         grad_a => no_grad
         hess_a => no_hess
@@ -299,32 +304,32 @@ contains
       m = jinv_matrix(t%j_inv)
       periodic = t%periodic /= 0
 
-      call evaluate_grid(t%global_n(1), t%global_n(2), t%global_n(3), periodic, m, rho_a, &
-                         opt%rho_min, n_negative > 0, diagnostic, int(opt%omp_threads), &
-                         rdg_a, srho_a, lam_a, grad_a, hess_a, flags_a, counts, kstatus)
+      call evaluate_grid(lay, periodic, m, rho_a, opt%rho_min, n_negative > 0, diagnostic, &
+                         int(opt%omp_threads), rdg_a, srho_a, lam_a, grad_a, hess_a, flags_a, &
+                         counts, kstatus)
       if (kstatus /= KERNEL_OK) then
         status = NCI_ALLOCATION_FAILURE
         call msg_set(msg, 'cannot allocate neighbour index tables; no output written')
         exit body
       end if
 
-      st%total_points = n
+      ! Output points only: halo samples never contribute to the stats.
+      st%total_points = nout
       st%valid_points = counts(7)
-      st%invalid_points = n - counts(7)
+      st%invalid_points = nout - counts(7)
       st%numeric_failures = counts(4)
       st%bit_counts = counts(0:6)
 
       if (counts(4) > 0) then
         status = NCI_NUMERIC_FAILURE
-        do p = 1, n
+        do p = 1, nout
           if (btest(int(flags_a(p)), 4)) exit
         end do
-        call diagnose_point(t%global_n(1), t%global_n(2), t%global_n(3), periodic, m, rho_a, &
-                            opt%rho_min, p, pstatus, nrot)
+        call diagnose_point(lay, periodic, m, rho_a, opt%rho_min, p, gpoint, pstatus, nrot)
         call msg_set(msg, 'numeric failure at ')
         call msg_add_int(msg, counts(4))
         call msg_add(msg, ' point(s); first at point ')
-        call msg_add_int(msg, p - 1)
+        call msg_add_int(msg, gpoint)
         select case (pstatus)
         case (PT_NONFINITE_DERIVATIVE)
           call msg_add(msg, ': non-finite index-space derivative')
