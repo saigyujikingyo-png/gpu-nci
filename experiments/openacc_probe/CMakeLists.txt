@@ -16,6 +16,9 @@ if(NOT CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC" OR NOT CMAKE_Fortran_COMPILER_
   message(FATAL_ERROR "M3A probe: requires NVHPC nvfortran 26.9, found "
     "${CMAKE_Fortran_COMPILER_ID} ${CMAKE_Fortran_COMPILER_VERSION}")
 endif()
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+  message(FATAL_ERROR "M3A stdin reader requires Linux x86_64 (POSIX ssize_t = C long)")
+endif()
 get_property(_m3a_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(_m3a_multi_config OR CMAKE_BUILD_TYPE)
   message(FATAL_ERROR "M3A probe: use a single-configuration generator and leave "
@@ -66,6 +69,19 @@ set(_m3a_src "${CMAKE_CURRENT_SOURCE_DIR}/src")
 # No source needs preprocessing: compile the hashed files themselves instead of
 # CMake's intermediate -Mpreprocess copies.
 set(CMAKE_Fortran_PREPROCESS OFF)
+
+# Explicit host-only I/O regression target; compiling the module provides its
+# result type, but this entry never calls scalar/RDG/point numerical routines.
+add_executable(m3a_parse_only EXCLUDE_FROM_ALL
+  "${_m3a_cpu}/nci_kinds.f90"
+  "${_m3a_cpu}/nci_numerics.f90"
+  "${_m3a_src}/m3a_io.f90"
+  "${_m3a_src}/m3a_parse_only.f90")
+target_compile_options(m3a_parse_only PRIVATE ${NCI_PROBE_HOST_FLAGS})
+target_link_options(m3a_parse_only PRIVATE -Kieee -Mnofma)
+set_target_properties(m3a_parse_only PROPERTIES
+  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/modules/parse_only"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/parse_only")
 
 # Host reference: production nci_kinds.f90 in place, nci_numerics.f90 with only
 # the test-only visibility of c_cbrt; no OpenACC.

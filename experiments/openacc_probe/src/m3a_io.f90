@@ -15,8 +15,8 @@
 !> rejects the whole input (exit 2) before anything is written to standard
 !> output. Output: upper-case hex, single blanks, one record per line.
 module m3a_io
-  use, intrinsic :: iso_fortran_env, only: input_unit, output_unit, error_unit, &
-                                           int64, iostat_end, iostat_eor
+  use, intrinsic :: iso_fortran_env, only: output_unit, error_unit, int64
+  use, intrinsic :: iso_c_binding, only: c_int, c_long, c_size_t, c_ptr, c_char, c_loc
   use nci_kinds, only: dp, i64, is_finite, all_finite
   use nci_numerics, only: point_result
   implicit none
@@ -33,10 +33,22 @@ module m3a_io
   character(len=*), parameter :: HEX = '0123456789ABCDEF'
 
   ! Reader state: the drivers read their input once, on the host, serially.
-  character(len=256) :: chunk = ' '
+  ! Linux x86_64 only: POSIX ssize_t is C long. Read real stdin bytes rather
+  ! than NVHPC formatted nonadvancing records (which lost long-line suffixes).
+  character(kind=c_char), target :: chunk(4096) = ' '
   integer :: chunk_len = 0, chunk_pos = 0
-  logical :: line_end_pending = .false., input_ended = .false.
+  logical :: input_ended = .false.
   integer(int64) :: bytes_read = 0, tokens_read = 0
+
+  interface
+    function stdin_read(fd, buffer, count) bind(C, name='read') result(received)
+      import :: c_int, c_long, c_size_t, c_ptr
+      integer(c_int), value :: fd
+      type(c_ptr), value :: buffer
+      integer(c_size_t), value :: count
+      integer(c_long) :: received
+    end function stdin_read
+  end interface
 
 contains
 
@@ -248,23 +260,21 @@ contains
   subroutine next_char(c, ended)
     character, intent(out) :: c
     logical, intent(out) :: ended
-    integer :: ios, code
+    integer :: code
+    integer(c_size_t) :: capacity
+    integer(c_long) :: received
     ended = .false.
     c = ' '
     do
       if (chunk_pos < chunk_len) then
         chunk_pos = chunk_pos + 1
-        c = chunk(chunk_pos:chunk_pos)
+        c = chunk(chunk_pos)
         code = ichar(c)
-        if (code == 9 .or. code == 13) then
+        if (code == 9 .or. code == 10 .or. code == 13) then
           c = ' '
         else if (code < 32 .or. code > 126) then
           call reject('byte outside printable ASCII')
         end if
-        return
-      end if
-      if (line_end_pending) then
-        line_end_pending = .false.
         return
       end if
       if (input_ended) then
@@ -273,16 +283,18 @@ contains
       end if
       chunk_len = 0
       chunk_pos = 0
-      read(input_unit, '(a)', advance='no', size=chunk_len, iostat=ios) chunk
-      if (ios == iostat_eor) then
-        line_end_pending = .true.
-        bytes_read = bytes_read + 1
-      else if (ios == iostat_end) then
-        input_ended = .true.
-      else if (ios /= 0) then
+      ! Read at most one byte beyond the cap to detect excess. Short positive
+      ! reads are ordinary byte-stream chunks, never synthetic separators.
+      capacity = min(int(size(chunk), c_size_t), int(MAX_INPUT_BYTES - bytes_read + 1, c_size_t))
+      received = stdin_read(0_c_int, c_loc(chunk(1)), capacity)
+      if (received < 0_c_long) then
         call reject('read error on standard input')
+      else if (received == 0_c_long) then
+        input_ended = .true.
+      else
+        chunk_len = int(received)
       end if
-      bytes_read = bytes_read + chunk_len
+      bytes_read = bytes_read + int(received, int64)
       if (bytes_read > MAX_INPUT_BYTES) call reject('input larger than 8 MiB')
     end do
   end subroutine next_char

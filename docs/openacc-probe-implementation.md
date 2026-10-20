@@ -23,6 +23,15 @@ device code. There is no copied numerical implementation or host replacement
 of returned device fields.
 
 `m3a_io.f90` reads the complete bounded hexadecimal M3A1 input from stdin.
+Its host reader uses POSIX `read(0,...)` and a 4096-byte interoperable C-char
+buffer. This isolated experiment is explicitly restricted to Linux x86_64,
+where `ssize_t` maps to C long; CMake rejects another platform when enabled.
+The binding uses value fd/count/c_ptr and `c_loc`, without a Fortran character
+descriptor. Positive short reads continue the same token, zero alone is EOF,
+and a negative return rejects input without retry. Actual bytes, including LF,
+count toward 8 MiB; at the exact cap one additional byte is requested solely
+to distinguish EOF from excess input. Space/tab/CR/LF are the only separators.
+No formatted Fortran input or synthesized record boundaries share fd0.
 The device driver explicitly selects NVIDIA device 0. Its three compute loops
 evaluate scalar helpers, RDG, and `point_eval`, respectively; each obtains its
 DEVICE flag in that same region. Inputs use explicit copyin and results copyout.
@@ -88,12 +97,58 @@ before output. Configure-only checks accepted the default-off GNU project and
 rejected enabled GNU, NVHPC Release, and extra global flags. These checks establish
 build behavior, not numerical correctness or actual GPU execution.
 
-At this source freeze, native numerical execution is **NOT_EXECUTED**. The
+At the initial e5d5a0f source freeze, native numerical execution was
+**NOT_EXECUTED**. The
 independent corpus and gates were committed separately before execution. A later
 execution report must identify exact source revisions and actual device evidence;
 compilation alone cannot change this acceptance status.
 
+## Preserved first execution failure and stdin repair
+
+The root-owned first finite attempt is preserved at
+`/opt/gpu-nci-development-builds-20261020/m3a-20261020T235144433074Z`.
+Host exit2 rejected input at token139 before numerical evaluation; GPU execution
+was not started. The actual 22024-byte payload matched the independent frozen
+input SHA-256 `ad9fd786113d8db5d7760475ab1be110eb7f042d576206efdcdd13535607c7f5`.
+Token139 is valid `3FF0000000000000`, at column255 of the first 2124-byte point
+block line: the first token crossing the old 256-byte buffer boundary.
+Root's separate pure-I/O reproduction at
+`/opt/gpu-nci-development-builds-20261020/m3a-reader-20261020T235317143336Z`
+showed NVHPC's nonadvancing formatted READ consuming256 bytes, then reporting
+zero bytes/EOR while losing the logical line suffix. Input reformatting and
+tolerance changes were not used to hide this failure.
+
+The correction changes only experimental stdin transport, leaving token rules,
+record parsing, production numerical modules, generated adapter, frozen input
+and independent numerical gates unchanged. The new explicit
+`m3a_parse_only` target compiles the CPU modules for their types, but its entry
+only calls read_input and emits actual parsed binary64 bits/integers in protocol
+order. It never calls scalar_record, rdg_record or point_eval and is excluded
+from the default standalone build. Its module/output directory is separate.
+
+```sh
+cmake --build /path/to/new-build --parallel 2 --verbose --target m3a_parse_only
+python experiments/openacc_probe/tools/parser_regression.py \
+  --parser /path/to/new-build/parse_only/m3a_parse_only \
+  --input /path/to/frozen/input.m3a1 --output-dir /path/to/new-cases
+```
+
+Configure/build retain the 600-second timeout and at most two jobs. The finite
+regression script runs ten fixed parser cases once each with a 10-second limit,
+preserving stdin/stdout/stderr, exit status and hashes in an exclusive directory.
+It checks every returned token, not just counts. New evidence at
+`/opt/gpu-nci-development-builds-20261020/m3a-parser-canonical-20261020T235728737531Z`
+records configure/build exit0 and **10/10 parser cases PASS**: original long
+lines, legal space/tab/CR/LF, a token across4096, no final LF, truncated hex,
+overlong token, excess input, NUL, exact8MiB, and cap+1. Every accepted case
+returns all1336 original tokens; rejected cases return exit2 with no stdout.
+The preliminary count-only9-case development run remains separately preserved
+at `.../m3a-parser-fix-20261020T235634932320Z`; final acceptance uses the full
+canonical-token run. No numerical or GPU executable was run by this repair.
+The full finite probe remains pending a newly frozen, root-owned execution.
+
 AI assistance: Claude Opus 5.5 max authored the experiment, adapter and drivers;
 GPT-6 Astra defined the contract, reviewed and completed its documentation;
-GPT-6.1 Sol authored the independent fixtures and verifier. Development uses only
+GPT-6.1 Sol authored the independent fixtures/verifier and the host stdin repair.
+Development uses only
 synthetic data. No AI service or network is required by the compiled programs.
