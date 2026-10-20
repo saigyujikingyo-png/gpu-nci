@@ -267,14 +267,20 @@ static void test_eval_arguments(void) {
     TILECASE(g.tile.rho_capacity = -1, NCI_INVALID_ARGUMENT, "negative capacity");
     TILECASE(g.tile.rho_capacity = 2 * g.npts, NCI_OK, "larger capacity accepted");
 
-    /* layouts: nonsensical descriptors are invalid, partial ones unsupported */
+    /* layouts: nonsensical descriptors are invalid, partial ones unsupported
+     * except canonical X slabs (docs/slab-contract.md, tested in test_slabs) */
     TILECASE(g.tile.tile_count[0] = 0, NCI_INVALID_ARGUMENT, "tile_count 0");
     TILECASE(g.tile.tile_count[0] = INT64_MIN, NCI_INVALID_ARGUMENT, "tile_count INT64_MIN");
     TILECASE(g.tile.tile_start[0] = INT64_MIN, NCI_INVALID_ARGUMENT, "tile_start INT64_MIN");
     TILECASE(g.tile.tile_start[1] = -1, NCI_INVALID_ARGUMENT, "tile_start -1");
     TILECASE((g.tile.tile_start[2] = 1), NCI_INVALID_ARGUMENT, "start+count beyond grid");
     TILECASE(g.tile.input_shape[1] = 0, NCI_INVALID_ARGUMENT, "input_shape 0");
-    TILECASE((g.tile.tile_start[0] = 1, g.tile.tile_count[0] = 5), NCI_UNSUPPORTED, "x slab");
+    /* Finite X slab [1,6) of Nx = 7: its clipped halo input is the whole grid. */
+    TILECASE((g.tile.tile_start[0] = 1, g.tile.tile_count[0] = 5), NCI_OK,
+             "finite x slab with the canonical clipped halo");
+    TILECASE((g.tile.tile_start[0] = 1, g.tile.tile_count[0] = 5, g.tile.periodic[0] = 1),
+             NCI_UNSUPPORTED, "periodic x slab without the unwrapped halo");
+    TILECASE((g.tile.tile_start[1] = 1, g.tile.tile_count[1] = 5), NCI_UNSUPPORTED, "y slab");
     TILECASE(g.tile.tile_count[2] = 4, NCI_UNSUPPORTED, "partial z count");
     TILECASE(g.tile.input_origin[1] = 1, NCI_UNSUPPORTED, "input origin");
     TILECASE(g.tile.input_origin[0] = -2, NCI_UNSUPPORTED, "halo origin");

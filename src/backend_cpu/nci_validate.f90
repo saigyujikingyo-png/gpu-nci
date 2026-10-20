@@ -1,6 +1,7 @@
 ! SPDX-License-Identifier: MIT
-!> Descriptor validation for ABI v1: options, tile header/geometry, capacities,
-!> int64 overflow, buffer overlap and the J inverse condition number.
+!> Descriptor validation for ABI v1: options, tile header/geometry, supported
+!> layouts, capacities, int64 overflow, buffer overlap and the J inverse
+!> condition number.
 !> Messages are assembled in a fixed buffer (no allocation, no I/O).
 module nci_validate
   use, intrinsic :: iso_c_binding, only: c_int
@@ -27,6 +28,21 @@ module nci_validate
     character(len=MSG_CAP) :: text = ''
     integer :: n = 0
   end type message_t
+
+  !> Validated geometry of one supported tile (internal, not part of the ABI;
+  !> see docs/slab-contract.md).  Output points are the nb complete X planes
+  !> x0 .. x0+nb-1 of the global grid, local dense Z-fastest.  Input plane k
+  !> holds global X plane xlo+k; only the legacy complete periodic grid (wrap)
+  !> folds X neighbours modulo Nx inside the input.  Y/Z are always complete.
+  type, public :: tile_layout
+    integer(i64) :: gn(3) = 0     !< global Nx, Ny, Nz
+    integer(i64) :: x0 = 0        !< global X of the first output plane (s)
+    integer(i64) :: nb = 0        !< output X planes (B)
+    integer(i64) :: xlo = 0       !< global X of the first input plane
+    integer(i64) :: nin = 0       !< supplied input samples, product(input_shape)
+    integer(i64) :: nout = 0      !< output points nb*Ny*Nz
+    logical :: wrap = .false.
+  end type tile_layout
 
   public :: msg_add, msg_add_int, msg_set
   public :: mul_overflows, check_options, check_tile_header, check_tile_geometry
@@ -128,17 +144,25 @@ contains
   end subroutine check_tile_header
 
   !> Dimensions, periodic flags, int64 overflow, layout and capacities.
-  !> On success n = Nx*Ny*Nz and every byte extent up to 48*n fits in int64.
-  pure subroutine check_tile_geometry(t, diagnostic, n, status, msg)
+  !> Supported layouts (docs/slab-contract.md), always with dense Z-fastest
+  !> strides [Ny*Nz, Nz, 1] and complete Y/Z:
+  !>   * the legacy complete grid (start/origin 0, count/shape = global_n);
+  !>   * a canonical X slab of B planes from s.  A periodic X input holds the
+  !>     B+4 unwrapped planes s-2 .. s+B+1; a finite X input holds the planes
+  !>     max(0,s-2) .. min(Nx,s+B+2)-1 (samples outside the grid are absent).
+  !> Every product, endpoint and capacity is checked before it is used; on
+  !> success the global N = Nx*Ny*Nz satisfies 48*N <= huge, 8*lay%nin fits
+  !> and lay%nout <= N.
+  pure subroutine check_tile_geometry(t, diagnostic, lay, status, msg)
     type(nci_tile_v1), intent(in) :: t
     logical, intent(in) :: diagnostic
-    integer(i64), intent(out) :: n
+    type(tile_layout), intent(out) :: lay
     integer(c_int), intent(out) :: status
     type(message_t), intent(inout) :: msg
-    integer(i64) :: gn(3), nyz
+    integer(i64) :: gn(3), nyz, n, nin, s, b, lo, hi
+    logical :: legacy
     integer :: d
     status = NCI_INVALID_ARGUMENT
-    n = 0
     gn = t%global_n
     do d = 1, 3
       if (gn(d) < 5) then
@@ -185,26 +209,87 @@ contains
         call msg_set(msg, 'tile.input_shape entries must be positive')
         return
       end if
+      ! The exclusive input end; input_shape >= 1 keeps huge - shape exact.
+      if (t%input_origin(d) > huge(n) - t%input_shape(d)) then
+        call msg_set(msg, 'tile.input_origin + input_shape overflows int64')
+        return
+      end if
     end do
-    if (any(t%tile_start /= 0) .or. any(t%tile_count /= gn) &
-        .or. any(t%input_origin /= 0) .or. any(t%input_shape /= gn) &
-        .or. t%input_strides(1) /= nyz .or. t%input_strides(2) /= gn(3) &
-        .or. t%input_strides(3) /= 1) then
-      status = NCI_UNSUPPORTED
-      call msg_set(msg, 'only complete-grid dense Z-fastest layouts are supported '// &
-                   '(start/origin 0, count/shape = global_n, strides = [Ny*Nz,Nz,1])')
+    nin = t%input_shape(1)
+    do d = 2, 3
+      if (mul_overflows(nin, t%input_shape(d))) then
+        call msg_set(msg, 'input sample count (product of input_shape) overflows int64')
+        return
+      end if
+      nin = nin*t%input_shape(d)
+    end do
+    if (mul_overflows(nin, 8_i64)) then
+      call msg_set(msg, 'input byte extent (8*product of input_shape) overflows int64')
       return
     end if
-    if (t%rho_capacity < n) then
-      call msg_set(msg, 'tile.rho_capacity is smaller than Nx*Ny*Nz')
-    else if (t%field_capacity < n) then
-      call msg_set(msg, 'tile.field_capacity is smaller than Nx*Ny*Nz')
-    else if (t%flags_capacity < n) then
-      call msg_set(msg, 'tile.flags_capacity is smaller than Nx*Ny*Nz')
-    else if (diagnostic .and. t%grad_capacity < 3*n) then
-      call msg_set(msg, 'tile.grad_capacity is smaller than 3*Nx*Ny*Nz')
-    else if (diagnostic .and. t%hess_capacity < 6*n) then
-      call msg_set(msg, 'tile.hess_capacity is smaller than 6*Nx*Ny*Nz')
+
+    ! Well-formed but unsupported layouts.  Only validated values enter the
+    ! arithmetic below: 0 <= s < Nx, 1 <= b <= Nx - s and 48*Nx is exact.
+    status = NCI_UNSUPPORTED
+    if (t%input_strides(1) /= nyz .or. t%input_strides(2) /= gn(3) &
+        .or. t%input_strides(3) /= 1) then
+      call msg_set(msg, 'unsupported input_strides: only dense Z-fastest [Ny*Nz,Nz,1] is supported')
+      return
+    end if
+    legacy = all(t%tile_start == 0) .and. all(t%tile_count == gn) &
+             .and. all(t%input_origin == 0) .and. all(t%input_shape == gn)
+    s = t%tile_start(1)
+    b = t%tile_count(1)
+    if (legacy) then
+      lo = 0
+      hi = gn(1)
+    else
+      if (any(t%tile_start(2:3) /= 0) .or. any(t%tile_count(2:3) /= gn(2:3)) &
+          .or. any(t%input_origin(2:3) /= 0) .or. any(t%input_shape(2:3) /= gn(2:3))) then
+        call msg_set(msg, 'unsupported layout: partial Y/Z tiles or Y/Z halos '// &
+                     '(only X slabs with complete Y/Z and Y/Z origin 0 are supported)')
+        return
+      end if
+      if (t%periodic(1) /= 0) then
+        lo = s - 2
+        hi = s + b + 2
+      else
+        lo = max(0_i64, s - 2)
+        hi = min(gn(1), s + b + 2)
+      end if
+      if (t%input_origin(1) /= lo .or. t%input_shape(1) /= hi - lo) then
+        if (t%periodic(1) /= 0) then
+          call msg_set(msg, 'unsupported X input: a periodic X slab needs the unwrapped '// &
+                       'halo input_origin[0] = tile_start[0]-2, input_shape[0] = tile_count[0]+4')
+        else
+          call msg_set(msg, 'unsupported X input: a finite X slab needs the clipped halo, '// &
+                       'input X planes max(0,s-2) .. min(Nx,s+B+2)-1')
+        end if
+        return
+      end if
+    end if
+    lay%gn = gn
+    lay%x0 = s
+    lay%nb = b
+    lay%xlo = lo
+    lay%nin = nin
+    lay%nout = b*nyz
+    lay%wrap = legacy .and. t%periodic(1) /= 0
+
+    status = NCI_INVALID_ARGUMENT
+    if (t%rho_capacity < lay%nin) then
+      call msg_set(msg, 'tile.rho_capacity is smaller than the input sample count '// &
+                   '(product of input_shape)')
+    else if (t%field_capacity < lay%nout) then
+      call msg_set(msg, 'tile.field_capacity is smaller than the output point count '// &
+                   '(product of tile_count)')
+    else if (t%flags_capacity < lay%nout) then
+      call msg_set(msg, 'tile.flags_capacity is smaller than the output point count '// &
+                   '(product of tile_count)')
+    else if (diagnostic .and. t%grad_capacity < 3*lay%nout) then
+      call msg_set(msg, 'tile.grad_capacity is smaller than 3*output points')
+    else if (diagnostic .and. t%hess_capacity < 6*lay%nout) then
+      call msg_set(msg, 'tile.hess_capacity is smaller than 6*output points')
     else
       status = NCI_OK
     end if
