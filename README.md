@@ -12,7 +12,7 @@ reproduction, or speedup is claimed by this initial scaffold.**
 The first target is Linux / WSL2 with GNU Fortran 13 and CMake 3.28+.
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNCI_BUILD_TEST_HOOKS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```

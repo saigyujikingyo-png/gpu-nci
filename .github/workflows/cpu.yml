@@ -17,6 +17,6 @@ jobs:
         if: hashFiles('requirements-dev.txt') != ''
       - name: Build and run synthetic checks
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPython3_EXECUTABLE=$(command -v python)
-          cmake --build build
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNCI_BUILD_TEST_HOOKS=ON -DPython3_EXECUTABLE=$(command -v python)
+          cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure
