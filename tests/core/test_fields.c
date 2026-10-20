@@ -522,6 +522,28 @@ static void test_all_invalid(void) {
     grid_free(&g);
 }
 
+/* Finite g/H/eigen followed by unrepresentable RDG must clear diagnostics. */
+static void test_rdg_overflow_diagnostics(void) {
+    static const double JI[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const int finite[3] = {0, 0, 0};
+    grid_t g;
+    grid_init(&g, 5, 5, 5, JI, finite, 1);
+    for (int64_t p = 0; p < g.npts; ++p) g.rho[p] = 1.0;
+    const int64_t p = lin(&g, 2, 2, 2);
+    g.rho[p] = 1e-250;
+    g.rho[lin(&g, 3, 2, 2)] = 2.0;
+    nci_options_v1 o = make_options(NCI_DIAGNOSTIC, 1, 1e-260, 0.0);
+    char err[256];
+    int st = eval_with(&o, &g, err, sizeof err);
+    CHECK(st == NCI_NUMERIC_FAILURE, "RDG overflow status %d: %s", st, err);
+    CHECK(g.flags[p] == NCI_POINT_NUMERIC_FAILURE, "RDG overflow has only bit4");
+    CHECK(isnan(g.rdg[p]) && isnan(g.srho[p]) && isnan(g.lam2[p]), "RDG overflow formal fields NaN");
+    for (int c = 0; c < 3; ++c) CHECK(isnan(g.grad[3*p+c]), "RDG overflow grad[%d] NaN", c);
+    for (int c = 0; c < 6; ++c) CHECK(isnan(g.hess[6*p+c]), "RDG overflow hess[%d] NaN", c);
+    check_flag_semantics(&g, finite, o.rho_min, st);
+    grid_free(&g);
+}
+
 int main(void) {
     const int all_per[3] = {1, 1, 1}, mixed_per[3] = {1, 0, 1};
     test_polynomial();
@@ -534,6 +556,7 @@ int main(void) {
     test_zero_lambda2();
     test_random_consistency();
     test_numeric_failure();
+    test_rdg_overflow_diagnostics();
     test_all_invalid();
     return test_report("test_fields");
 }

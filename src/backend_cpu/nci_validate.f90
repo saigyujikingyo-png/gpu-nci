@@ -171,8 +171,13 @@ contains
       return
     end if
     do d = 1, 3
-      if (t%tile_count(d) < 1 .or. t%tile_start(d) < 0 &
-          .or. t%tile_start(d) > gn(d) - t%tile_count(d)) then
+      ! Fortran .or. need not short-circuit: reject negative extents before
+      ! evaluating gn-count, in particular when count is INT64_MIN.
+      if (t%tile_count(d) < 1 .or. t%tile_start(d) < 0) then
+        call msg_set(msg, 'tile_start/tile_count lie outside the global grid')
+        return
+      end if
+      if (t%tile_start(d) > gn(d) - t%tile_count(d)) then
         call msg_set(msg, 'tile_start/tile_count lie outside the global grid')
         return
       end if

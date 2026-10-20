@@ -2,8 +2,9 @@
 
 Status: first CPU implementation of `include/nci_api.h` in Fortran 2008 +
 `ISO_C_BINDING` with optional OpenMP. It is **implemented and passes its own
-synthetic tests** (grids ≤ 17³). It has **not** been compared with the
-independent NumPy/SciPy oracle, has **no real-density acceptance**, performs
+synthetic tests** (grids ≤ 17³). Full acceptance against the independent
+NumPy/SciPy oracle remains pending (two focused failure regressions were checked),
+it has **no real-density acceptance**, performs
 **no GPU offload**, and **no performance has been measured**. The sign
 classification it reports concerns implementation roundoff only; it never
 certifies a scientific sign (bit 6 is always set on valid points).
@@ -19,9 +20,17 @@ certifies a scientific sign (bit 6 is always set on valid points).
 Floating-point controls (GNU): the root scaffold adds `-ffp-contract=off`
 to Fortran; the backend repeats it on its own target and adds `-frecursive`
 (all locals on the stack, so distinct contexts may be used concurrently).
+For NVHPC, the backend target adds `-Kieee -Mnofma -Mrecursive -Mreentrant`
+also when built from the original standalone scaffold. These controls preserve
+the no-contraction policy and automatic/reentrant locals for distinct contexts.
+The caller must preserve IEEE binary64 round-to-nearest and gradual underflow;
+the library does not change process-wide rounding or denormal modes. FTZ/DAZ
+and externally changed rounding modes are outside this initial contract.
 Configuration aborts if the Fortran flags contain `-ffast-math`, `-Ofast`,
 `-funsafe-math-optimizations`, `-fassociative-math`, `-freciprocal-math` or
-`-ffp-contract=fast`. The CTest `core_library_inspection` checks with
+`-ffp-contract=fast`, or the NVHPC options `-fast`, `-Mfprelaxed`, `-Mflushz`.
+This guard recognizes those explicit options, not every possible unsafe flag.
+The CTest `core_library_inspection` checks with
 `nm`/`objdump` that the shared object exports only the three functions,
 contains no `vfmadd*`/`vfmsub*`/`vfnmadd*`/`vfnmsub*` instruction, references
 no Fortran STOP or external I/O entry point, and (non-Debug) no runtime-error
@@ -44,8 +53,12 @@ runs serially and `omp_threads` is only validated.
 `create`: `*context` is set to NULL first whenever `context` is non-NULL.
 The context is one heap object (magic tag + validated copy of the options),
 allocated once and freed by `destroy`; there is no module-level mutable state.
-`destroy(NULL)` and pointers without the live tag return `INVALID_ARGUMENT`
-(use after destroy remains a caller contract violation).
+`destroy(NULL)` returns `INVALID_ARGUMENT`. Callers must otherwise supply a live
+context returned by this library and destroy it exactly once. The magic-tag
+check can reject a readable object with an invalid tag; it is not safe-address
+validation for arbitrary pointers. Forged, stale, already destroyed or otherwise
+invalid context addresses violate the caller contract and have no promised
+status result.
 
 errbuf: NULL is accepted only with length 0; a non-NULL buffer with length 0
 is never touched. Otherwise exactly one bounded, NUL-terminated message (empty
@@ -60,7 +73,7 @@ written before the preflight succeeds):
 |---|---|
 | errbuf NULL with length > 0 | `INVALID_ARGUMENT` (no write at all) |
 | build layout (`c_sizeof` 40/280/88) | `BACKEND_UNAVAILABLE` |
-| NULL or foreign context; NULL tile | `INVALID_ARGUMENT` |
+| NULL context or readable invalid-tag object; NULL tile | `INVALID_ARGUMENT` (arbitrary invalid addresses remain caller violations) |
 | tile `abi_version`/`struct_bytes`/`reserved` | `INVALID_ARGUMENT` |
 | NULL rho/rdg/signedrho/lambda2/flags/stats | `INVALID_ARGUMENT` |
 | FULL: grad/hess non-NULL or capacities ≠ 0; DIAGNOSTIC: grad/hess NULL | `INVALID_ARGUMENT` |
@@ -109,9 +122,10 @@ set bit 3. Low positive samples participate as well. No value is clamped.
 
 Outputs: bits 0–3 → rdg, signedrho, lambda2 and (DIAGNOSTIC) all 9
 gradient/Hessian components are the quiet NaN `0x7FF8000000000000`, bits
-4–6 are 0. Bit 4 → rdg/signedrho/lambda2 NaN, bits 5/6 zero, the diagnostic
-gradient/Hessian hold the values computed before the failure (possibly
-non-finite) for debugging. Valid → finite rdg/lambda2/signedrho; signedrho is
+4–6 are 0. Bit 4 → rdg/signedrho/lambda2 and all diagnostic gradient/Hessian
+entries are NaN, bits 5/6 zero, as required by the main ABI v1 contract.
+Diagnostic fields are copied only after point evaluation succeeds; partial
+results on numeric failure are not exposed. Valid → finite rdg/lambda2/signedrho; signedrho is
 exactly `+rho`, `−rho`, or `+0.0` when `λ̂₂ == 0`.
 
 Statistics: `total = N`; `valid = |V|` with V = points with bits 0–4 clear;
@@ -150,7 +164,10 @@ Because the frozen stopping rule may leave an off-diagonal of up to
 `64ε·max|H_ij|`, the absolute eigenvalue error can reach about `64ε‖H‖₂`
 (observed ≤ 35ε‖H‖₂ on graded matrices); small eigenvalues of strongly graded
 Hessians can therefore have large relative error — the bound below reports
-it. The test-only hook `hook_eig3(..., max_rotations, ...)` exercises the
+it. The original quad self-test's `80ε‖H‖₂` accuracy threshold is an empirical
+acceptance criterion motivated by that stopping rule, not a proof of an
+80ε error theorem. Its algorithm and tolerances are unchanged.
+The test-only hook `hook_eig3(..., max_rotations, ...)` exercises the
 nonconvergence branch (`max_rotations = 1` on `[[2,1,1],[1,2,1],[1,1,2]]`);
 production always passes the constant 30 and exposes no tuning.
 
@@ -173,9 +190,12 @@ discrete formulas above evaluated on the given binary64 samples and the given
 binary64 `j_inv`. If bit 5 is clear, `sign(λ̂₂) = sign(λ₂*)`. Discretization
 and input errors are outside this bound (bit 6).
 
-Model: round to nearest binary64, `fl(x∘y) = (x∘y)(1+δ) + η'`, `|δ| ≤ u = 2⁻⁵³`,
+Model: round to nearest binary64 with gradual underflow,
+`fl(x∘y) = (x∘y)(1+δ) + η'`, `|δ| ≤ u = 2⁻⁵³`,
 `|η'| ≤ 2⁻¹⁰⁷⁵` for × and ÷ (η' = 0 for ±, whose subnormal results are
 exact), no contraction. `γ_n = nu/(1−nu)`.
+The synthetic bound checks support this implementation under those conditions;
+they are not a formal proof and do not cover FTZ/DAZ or altered rounding modes.
 
 1. **Stencil.** Each Hessian component is a fixed tree whose leaves are samples
    times exact powers of two; the longest leaf-to-root path has 4 roundings
@@ -197,9 +217,14 @@ exact), no contraction. `γ_n = nu/(1−nu)`.
    (else bit 4), the polar factor `V = UP` gives
    `UᵀA⁰U = D + X`, X symmetric,
    `‖X‖₂ ≤ (‖R‖₂ + 2δ‖D‖₂)/√(1−δ) ≤ (1+δ)(r + 2δ·max|d|)`, and Weyl gives
-   `|λ_k(A⁰) − d_(k)| ≤ ‖X‖₂`. Rescaling: `B_eig = 2ᵉ(1+δ)(r + 2δ·max|d|)`.
-   This is independent of the pivoting order and of how converged Jacobi is.
-4. **Underflow and bound arithmetic.** All absolute underflow contributions
+   `|λ_k(A⁰) − d_(k)| ≤ ‖X‖₂`. The rescaled contribution is
+   `B_eig = 2ᵉ(1+δ)(r + 2δ·max|d|)`, independent of pivoting order and convergence level.
+   `B_eig` alone is not a uniform bound on the returned binary64 eigenvalues:
+   `scale(bs,e)` may underflow to zero while `scale(d,e)` incurs subnormal
+   rounding (e.g. a least-subnormal-scaled matrix). The complete point-level
+   estimate below also includes rescaling/underflow and bound-arithmetic terms.
+4. **Underflow, eigenvalue rescaling and bound arithmetic.** Under the stated
+   gradual-underflow model, all absolute underflow contributions
    are below `14η(1+s)²`, `s = max_a Σ_i|M_ia|`; they are dominated by
    `F = ((1+s)·2⁻⁵³²)² ≈ 2⁻¹⁰⁶⁴(1+s)²`. Relative rounding in computing the
    bound itself (A, P, norms, r, δ: < 300 operations) is covered by the factor
@@ -249,8 +274,17 @@ Left-handed J are accepted.
 | `core_library_inspection` | CMake script | exports, no FMA, no STOP/I-O |
 | `core_test_eigen` | Fortran, hooks | known roots, power-of-two scale invariance, decimal/subnormal scaling, extreme ratios, forced nonconvergence, random families vs binary128, bound validity |
 | `core_test_numerics` | Fortran, hooks | constants, stencil set, stencil isolation (NaN outside the 61 points), norms, transform/row-major mapping, condition number, bound vs binary128, RDG extremes |
+| `core_test_eigen_portable` | Fortran FP64, hooks | known roots 1,1,4; one-rotation forced nonconvergence and production 30-rotation convergence; sorted finite eigenvalues and bound |
 
-The last two need `-DNCI_BUILD_TEST_HOOKS=ON`. `core_test_fields` also
+The three white-box tests need `-DNCI_BUILD_TEST_HOOKS=ON`. CMake first compiles
+a capability probe for IEEE binary128 (113 binary digits, 128 storage bits).
+Only when available are the original, unchanged `core_test_eigen` and
+`core_test_numerics` plus their quad reference built. Otherwise configuration
+reports binary128 UNAVAILABLE and CTest records `core_binary128_unavailable`
+as SKIPPED, never a quad-test pass. The FP64 hooks and portable forced-path
+test remain built regardless of quad availability. This is a portability
+fallback for the test harness, not a replacement numerical oracle.
+`core_test_fields` also
 prints an FNV-1a checksum of all outputs of its polynomial grid; comparing it
 across build types is a quick check that no value-changing optimization slipped
 in (it was identical for GNU 13.3 Debug `-O0`, Release `-O3` and an
@@ -263,9 +297,32 @@ OpenMP-disabled build).
 - Only complete grids; slabs/tiles/halos return `UNSUPPORTED` (M2).
 - RDG uses libm `cbrt`: values may differ by about one ulp across libm
   implementations (no sign role).
-- The rounding guarantees assume IEEE binary64 round-to-nearest without
-  contraction; only the GNU toolchain is configured and inspected.
+- The rounding model assumes IEEE binary64 round-to-nearest, gradual underflow
+  and no contraction; no FTZ/DAZ/changed-rounding support is claimed. NVHPC
+  flags are configured explicitly; compiler-specific quad availability is
+  reported independently from FP64 synthetic results.
 - Messages carry indices but no floating-point values (no I/O formatting is
   used inside the library).
 - `omp_threads` is unused without OpenMP (gfortran reports an unused dummy
   argument in that configuration).
+
+## Focused correction verification
+
+The sequential follow-up corrected bit-4 diagnostic NaNs, negative-extent
+arithmetic ordering and the external-source test path. It added compiler
+capability gating for the unchanged quad tests and a separate FP64 hook test.
+No numerical algorithm, Jacobi cap, tolerance or scientific specification changed.
+
+- GNU 13.3 Debug, hooks ON: native CTest 9/9 passed, including both original
+  binary128 tests and the portable hook test (9 assertions).
+- The independent oracle's RDG-overflow and INT64_MIN regressions: 2 passed.
+  A separate GNU `-ftrapv` production build passed the INT64_MIN subprocess
+  regression (1 passed, no signal or output writes).
+- NVHPC 26.9 Debug: native tests 7 passed, 1 explicitly skipped because the
+  binary128 capability is unavailable. FP64 forced nonconvergence, concurrency,
+  fields, contract, layout and library inspection passed; the two focused
+  independent regressions passed. NVHPC's C-main layout test links with
+  target-local `-Mnomain`; production exports and ABI are unchanged.
+
+These focused results are not the root's full joint multi-configuration
+acceptance and do not establish real-density, GPU or performance acceptance.

@@ -269,6 +269,8 @@ static void test_eval_arguments(void) {
 
     /* layouts: nonsensical descriptors are invalid, partial ones unsupported */
     TILECASE(g.tile.tile_count[0] = 0, NCI_INVALID_ARGUMENT, "tile_count 0");
+    TILECASE(g.tile.tile_count[0] = INT64_MIN, NCI_INVALID_ARGUMENT, "tile_count INT64_MIN");
+    TILECASE(g.tile.tile_start[0] = INT64_MIN, NCI_INVALID_ARGUMENT, "tile_start INT64_MIN");
     TILECASE(g.tile.tile_start[1] = -1, NCI_INVALID_ARGUMENT, "tile_start -1");
     TILECASE((g.tile.tile_start[2] = 1), NCI_INVALID_ARGUMENT, "start+count beyond grid");
     TILECASE(g.tile.input_shape[1] = 0, NCI_INVALID_ARGUMENT, "input_shape 0");

@@ -174,15 +174,19 @@ contains
               rdg(p) = res%rdg
               srho(p) = res%signed_rho
               lam2(p) = res%lambda(2)
+              if (diagnostic) then
+                grad(:, p) = res%grad
+                hess(:, p) = res%hess
+              end if
             else
               fl = FLAG_POINT_NUMERIC_FAILURE
               rdg(p) = nan
               srho(p) = nan
               lam2(p) = nan
-            end if
-            if (diagnostic) then
-              grad(:, p) = res%grad
-              hess(:, p) = res%hess
+              if (diagnostic) then
+                grad(:, p) = nan
+                hess(:, p) = nan
+              end if
             end if
           else
             rdg(p) = nan

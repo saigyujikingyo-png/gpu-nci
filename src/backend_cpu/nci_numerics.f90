@@ -154,8 +154,9 @@ contains
     end do
   end function jinv_matrix
 
-  !> Absolute floor that dominates all underflow (gradual or flush) error
-  !> contributions of the derivative, transform and rescaling steps.
+  !> Absolute floor for underflow contributions of the derivative, transform
+  !> and rescaling steps under IEEE round-to-nearest with gradual underflow.
+  !> FTZ/DAZ and externally changed rounding modes are outside this contract.
   pure function underflow_floor(absm) result(f)
     real(dp), intent(in) :: absm(3, 3)
     real(dp) :: f
@@ -325,9 +326,12 @@ contains
   !> The matrix is scaled by the exact power of two 2**-e with
   !> max|a| in [0.5,1).  Classical Jacobi (largest off-diagonal pivot) stops
   !> once the off-diagonal Frobenius norm is <= 64*eps*max|a|; at most max_rot
-  !> rotations are performed (production: JACOBI_MAX_ROTATIONS).  `bound` is a
-  !> rigorous bound on |lam_k - lambda_k(h6)| derived from the computed
-  !> residual R = A V - V D and orthogonality defect V^T V - I.
+  !> rotations are performed (production: JACOBI_MAX_ROTATIONS). `bound` is the
+  !> scaled residual/orthogonality contribution from R = A V - V D and V^T V-I.
+  !> It is not a standalone uniform error certificate: rescaling can round
+  !> eigenvalues into subnormals while this contribution rounds to zero.
+  !> point_eval adds bound-arithmetic inflation and the underflow floor;
+  !> the complete estimate assumes round-to-nearest with gradual underflow.
   pure subroutine eig3_jacobi(h6, max_rot, lam, bound, nrot, info)
     real(dp), intent(in) :: h6(6)
     integer, intent(in) :: max_rot

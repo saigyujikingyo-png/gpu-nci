@@ -229,11 +229,11 @@ void check_flag_semantics(const grid_t *g, const int periodic[3], double rho_min
                 ok = ok && f == NCI_POINT_NUMERIC_FAILURE && exp03[p] == 0;
             } else {
                 ok = ok && (f & 0x70u) == 0;
-                if (g->diag)
-                    for (int c = 0; c < 3; ++c) ok = ok && isnan(g->grad[3 * p + c]);
-                if (g->diag)
-                    for (int c = 0; c < 6; ++c) ok = ok && isnan(g->hess[6 * p + c]);
             }
+            if (g->diag)
+                for (int c = 0; c < 3; ++c) ok = ok && isnan(g->grad[3 * p + c]);
+            if (g->diag)
+                for (int c = 0; c < 6; ++c) ok = ok && isnan(g->hess[6 * p + c]);
             if (!ok && badnan++ < 5)
                 fprintf(stderr, "  point %zu: invalid point outputs/bits wrong (flags 0x%02x)\n",
                         p, f);

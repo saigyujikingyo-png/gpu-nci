@@ -12,6 +12,9 @@ foreach(_v IN LISTS _nci_flag_vars)
   if("${${_v}}" MATCHES "(-ffast-math|-Ofast|-funsafe-math-optimizations|-fassociative-math|-freciprocal-math|-ffp-contract=fast)")
     message(FATAL_ERROR "nci_cpu: ${_v} contains '${CMAKE_MATCH_1}', which voids the documented rounding bounds")
   endif()
+  if("${${_v}}" MATCHES "(^|[ \t;])(-fast|-Mfprelaxed|-Mflushz)([=, \t;]|$)")
+    message(FATAL_ERROR "nci_cpu: ${_v} contains '${CMAKE_MATCH_2}', which violates the IEEE/gradual-underflow policy")
+  endif()
 endforeach()
 
 set(NCI_CPU_SOURCES
@@ -29,6 +32,10 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
   # backend keeps it if the scaffold changes.  -frecursive keeps every local
   # on the stack (re-entrant calls on distinct contexts).
   target_compile_options(nci_cpu_objects PRIVATE -ffp-contract=off -frecursive)
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  # Keep the IEEE/no-contraction contract in standalone and external builds;
+  # automatic/reentrant locals are needed for distinct concurrent contexts.
+  target_compile_options(nci_cpu_objects PRIVATE -Kieee -Mnofma -Mrecursive -Mreentrant)
 endif()
 if(NCI_ENABLE_OPENMP)
   target_link_libraries(nci_cpu_objects PUBLIC OpenMP::OpenMP_Fortran)
@@ -47,5 +54,5 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(BUILD_TESTING)
-  add_subdirectory("${PROJECT_SOURCE_DIR}/tests/core" "${CMAKE_CURRENT_BINARY_DIR}/tests_core")
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../tests/core" "${CMAKE_CURRENT_BINARY_DIR}/tests_core")
 endif()
