@@ -50,7 +50,7 @@ module nci_numerics
     real(dp) :: lambda(3) = 0.0_dp    !< ascending eigenvalues of hess
     real(dp) :: rdg = 0.0_dp
     real(dp) :: signed_rho = 0.0_dp
-    real(dp) :: bound = 0.0_dp        !< rigorous |lambda_k - exact| bound
+    real(dp) :: bound = 0.0_dp        !< point error estimate under the documented IEEE model
     real(dp) :: tau = 0.0_dp          !< TAU_ABS + TAU_REL*|H|_2 + bound
   end type point_result
 
@@ -65,6 +65,7 @@ module nci_numerics
   public :: stencil61, fro_norm, hypot2, jinv_matrix, underflow_floor
   public :: index_derivatives, cartesian_transform, bound_matrix
   public :: eig3_jacobi, point_eval
+  public :: rdg_from_gradient
 
 contains
 
@@ -94,8 +95,9 @@ contains
     end do
   end function stencil61
 
-  !> Frobenius norm with exact power-of-two scaling (no overflow, no harmful
-  !> underflow).  Any non-finite entry is returned as is.
+  !> Frobenius norm with power-of-two scaling to avoid squaring overflow.
+  !> The final norm can still overflow if it is not representable in binary64;
+  !> subnormal results are rounded. Any non-finite entry is returned as is.
   pure function fro_norm(n, x) result(r)
     integer, intent(in) :: n
     real(dp), intent(in) :: x(n)
@@ -114,18 +116,18 @@ contains
       r = 0.0_dp
       return
     end if
-    e = exponent(m)
+    e = binary_exponent(m)
     s = 0.0_dp
     do i = 1, n
-      y = scale(x(i), -e)
+      y = pow2_scale(x(i), -e)
       s = s + y*y
     end do
-    r = scale(sqrt(s), e)
+    r = pow2_scale(sqrt(s), e)
   end function fro_norm
 
-  !> sqrt(x**2 + y**2) with exact power-of-two scaling: no overflow, no
-  !> harmful underflow, and only correctly rounded IEEE operations (no libm
-  !> hypot, whose rounding is implementation defined).
+  !> Scaled sqrt(x**2+y**2), avoiding intermediate squaring overflow. The final
+  !> norm is rounded and can overflow when it is not representable. Uses the
+  !> shared power-of-two wrapper and sqrt under the documented IEEE policy.
   pure function hypot2(x, y) result(h)
     real(dp), intent(in) :: x, y
     real(dp) :: h
@@ -136,10 +138,10 @@ contains
       h = m
       return
     end if
-    e = exponent(m)
-    xs = scale(x, -e)
-    ys = scale(y, -e)
-    h = scale(sqrt(xs*xs + ys*ys), e)
+    e = binary_exponent(m)
+    xs = pow2_scale(x, -e)
+    ys = pow2_scale(y, -e)
+    h = pow2_scale(sqrt(xs*xs + ys*ys), e)
   end function hypot2
 
   !> M(i,a) = j_inv[3*i + a] (row-major C, zero based) = d q_i / d r_a.
@@ -352,18 +354,18 @@ contains
       bound = 0.0_dp
       return
     end if
-    e = exponent(amax)
-    a0(1, 1) = scale(h6(1), -e)
-    a0(2, 2) = scale(h6(2), -e)
-    a0(3, 3) = scale(h6(3), -e)
-    a0(1, 2) = scale(h6(4), -e)
-    a0(1, 3) = scale(h6(5), -e)
-    a0(2, 3) = scale(h6(6), -e)
+    e = binary_exponent(amax)
+    a0(1, 1) = pow2_scale(h6(1), -e)
+    a0(2, 2) = pow2_scale(h6(2), -e)
+    a0(3, 3) = pow2_scale(h6(3), -e)
+    a0(1, 2) = pow2_scale(h6(4), -e)
+    a0(1, 3) = pow2_scale(h6(5), -e)
+    a0(2, 3) = pow2_scale(h6(6), -e)
     a0(2, 1) = a0(1, 2)
     a0(3, 1) = a0(1, 3)
     a0(3, 2) = a0(2, 3)
     a = a0
-    thresh = JACOBI_OFFDIAG_TOL*scale(amax, -e)
+    thresh = JACOBI_OFFDIAG_TOL*pow2_scale(amax, -e)
     v = 0.0_dp
     v(1, 1) = 1.0_dp
     v(2, 2) = 1.0_dp
@@ -434,9 +436,33 @@ contains
     !                       <= (1 + delta)(|R|_F + 2 delta max|d|), delta <= 1/2.
     bs = (1.0_dp + delta)*(rnorm + 2.0_dp*delta*dmax)
     call sort3(d)
-    lam = scale(d, e)
-    bound = scale(bs, e)
+    lam = pow2_scale(d, e)
+    bound = pow2_scale(bs, e)
   end subroutine eig3_jacobi
+
+  !> RDG for finite Cartesian gr and finite rho>0. Keep the gradient norm,
+  !> rho and cbrt(rho) as bounded mantissas plus integer exponents, so neither
+  !> the physical norm nor |g|/rho needs to fit before the final result does.
+  !> Only final exponent restoration may overflow/underflow; point_eval rejects nonfinite
+  !> RDG. A genuinely unrepresentable tiny result rounds under gradual underflow.
+  pure function rdg_from_gradient(gr,rho) result(rdg)
+    real(dp), intent(in) :: gr(3),rho
+    real(dp) :: rdg,gmax,scaled_grad(3),norm_fraction,cube_root,mantissa
+    integer :: grad_exponent,result_exponent
+    gmax=maxval(abs(gr))
+    if (gmax==0.0_dp) then
+      rdg=0.0_dp
+      return
+    end if
+    grad_exponent=binary_exponent(gmax)
+    scaled_grad=pow2_scale(gr,-grad_exponent)
+    norm_fraction=sqrt((scaled_grad(1)*scaled_grad(1)+scaled_grad(2)*scaled_grad(2)) &
+                       +scaled_grad(3)*scaled_grad(3))
+    cube_root=c_cbrt(rho)
+    mantissa=(norm_fraction/binary_fraction(rho))/(C_RDG*binary_fraction(cube_root))
+    result_exponent=grad_exponent-binary_exponent(rho)-binary_exponent(cube_root)
+    rdg=pow2_scale(mantissa,result_exponent)
+  end function rdg_from_gradient
 
   !> Full evaluation of one point whose 61-point stencil is complete and free
   !> of negative samples and whose centre density is above rho_min.
@@ -446,7 +472,7 @@ contains
     integer, intent(in) :: max_rot
     type(point_result), intent(out) :: res
     real(dp) :: gq(3), hq(3, 3), aq(3, 3), gr(3), hr(3, 3), pm(3, 3)
-    real(dp) :: lam(3), beig, blam, tol, hnorm, rho0, gnorm
+    real(dp) :: lam(3), beig, blam, tol, hnorm, rho0
     integer :: a, b, nrot, info
 
     res%grad = qnan()
@@ -509,10 +535,8 @@ contains
     res%uncertain = .not. (abs(lam(2)) > res%tau)
 
     rho0 = blk(0, 0, 0)
-    gnorm = fro_norm(3, gr)
-    ! s = |g| / (C rho**(4/3)) evaluated as (|g|/rho)/(C*cbrt(rho)) so that
-    ! rho**(4/3) never overflows or underflows on its own.
-    res%rdg = (gnorm/rho0)/(C_RDG*c_cbrt(rho0))
+    ! Equivalent s=|g|/(C*rho*cbrt(rho)), with one final exponent restoration.
+    res%rdg = rdg_from_gradient(gr,rho0)
     if (.not. is_finite(res%rdg)) then
       res%status = PT_NONFINITE_RESULT
       return

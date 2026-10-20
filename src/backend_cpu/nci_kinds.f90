@@ -2,7 +2,7 @@
 !> Kind parameters, IEEE-754 bit helpers and frozen binary64 constants of the
 !> CPU core.  Nothing here holds mutable state.
 module nci_kinds
-  use, intrinsic :: iso_c_binding, only: c_double, c_int8_t, c_int32_t, c_int64_t
+  use, intrinsic :: iso_c_binding, only: c_double, c_int, c_int8_t, c_int32_t, c_int64_t
   implicit none
   private
 
@@ -29,9 +29,58 @@ module nci_kinds
 
   integer(i64), parameter :: EXPONENT_MASK = 2047_i64
 
-  public :: qnan, is_finite, all_finite
+  public :: qnan, is_finite, all_finite, pow2_scale, binary_exponent, binary_fraction
+
+  interface
+    pure function c_scalbn(x,n) bind(C,name='scalbn') result(y)
+      import :: c_double,c_int
+      real(c_double),value :: x
+      integer(c_int),value :: n
+      real(c_double) :: y
+    end function c_scalbn
+  end interface
 
 contains
+
+  !> Portable binary power scaling under the caller's IEEE rounding/denormal
+  !> policy. libc scalbn handles representable large/subnormal endpoints where
+  !> NVHPC26.9's intrinsic SCALE returned Inf/zero in actual scalar probes.
+  !> All production exponents are bounded well within the C int range.
+  pure elemental function pow2_scale(x,n) result(y)
+    real(dp),intent(in) :: x
+    integer,intent(in) :: n
+    real(dp) :: y
+    y=c_scalbn(x,int(n,c_int))
+  end function pow2_scale
+
+  !> frexp/EXPONENT convention for finite IEEE binary64 input; zero -> 0.
+  !> NVHPC26.9 returned -1022 for every tested subnormal EXPONENT input.
+  !> Extract the stored exponent or highest subnormal mantissa bit directly.
+  !> The sign has no effect on this integer exponent. Nonfinite inputs are
+  !> outside this helper's contract and are rejected by production callers.
+  pure elemental function binary_exponent(x) result(e)
+    real(dp),intent(in) :: x
+    integer :: e
+    integer(i64) :: bits,stored,mantissa
+    bits=transfer(x,0_i64)
+    stored=iand(shiftr(bits,52),EXPONENT_MASK)
+    if (stored>0_i64.and.stored<EXPONENT_MASK) then
+      e=int(stored)-1022
+    else if (stored==0_i64) then
+      mantissa=iand(bits,int(z'000FFFFFFFFFFFFF',i64))
+      e=0
+      if (mantissa/=0_i64) e=-1073+(bit_size(mantissa)-1-leadz(mantissa))
+    else
+      e=0
+    end if
+  end function binary_exponent
+
+  !> Signed fraction for finite IEEE binary64, with signed zero preserved.
+  pure elemental function binary_fraction(x) result(f)
+    real(dp),intent(in) :: x
+    real(dp) :: f
+    f=pow2_scale(x,-binary_exponent(x))
+  end function binary_fraction
 
   pure function qnan() result(x)
     real(dp) :: x

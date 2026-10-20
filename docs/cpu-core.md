@@ -3,8 +3,9 @@
 Status: first CPU implementation of `include/nci_api.h` in Fortran 2008 +
 `ISO_C_BINDING` with optional OpenMP. It is **implemented and passes its own
 synthetic tests** (grids ≤ 17³). Full acceptance against the independent
-NumPy/SciPy oracle remains pending (two focused failure regressions were checked),
-it has **no real-density acceptance**, performs
+NumPy/SciPy oracle is tracked centrally in the root
+[status record](status.md) and linked PR acceptance evidence; the focused local
+checks below do not establish that overall acceptance. It has **no real-density acceptance**, performs
 **no GPU offload**, and **no performance has been measured**. The sign
 classification it reports concerns implementation roundoff only; it never
 certifies a scientific sign (bit 6 is always set on valid points).
@@ -36,11 +37,13 @@ contains no `vfmadd*`/`vfmsub*`/`vfnmadd*`/`vfnmsub*` instruction, references
 no Fortran STOP or external I/O entry point, and (non-Debug) no runtime-error
 or allocation-abort path. Every multi-term sum in the stencil, transform,
 Jacobi and bound code is explicitly parenthesized, so the evaluation order
-assumed by the rounding analysis is fixed by the language. Apart from the
-exact `frexp`/`scalbn` behind the `exponent`/`scale` intrinsics, the only
-libm call in the numerics is `cbrt` (RDG); `hypot` is replaced by an exactly
-power-of-two-scaled `sqrt`, so the derivative, transform, Jacobi and bound
-paths use only correctly rounded IEEE operations.
+assumed by the rounding analysis is fixed by the language. CPU power-of-two
+scaling uses one pure elemental `pow2_scale` wrapper over libc `scalbn`.
+`binary_exponent` extracts the finite IEEE binary64 exponent from its bit
+pattern, including subnormals; `binary_fraction` uses that exponent and the
+same scaling wrapper. `hypot` is replaced by a scaled `sqrt`. These operations
+follow the documented IEEE model; the synthetic checks are not a full-domain
+proof. RDG additionally uses libm `cbrt`.
 
 OpenMP: one `parallel do collapse(2) num_threads(omp_threads)` over the grid
 (and one over the density preflight). No `omp_set_*` call is made. Each point
@@ -171,9 +174,33 @@ The test-only hook `hook_eig3(..., max_rotations, ...)` exercises the
 nonconvergence branch (`max_rotations = 1` on `[[2,1,1],[1,2,1],[1,1,2]]`);
 production always passes the constant 30 and exposes no tuning.
 
-**RDG**: `s = (|g_r|/ρ)/(C·cbrt(ρ))`, which equals `|g|/(Cρ^{4/3})` but never
-forms `ρ^{4/3}` on its own (no spurious overflow/underflow). `|g_r|` uses a
-power-of-two-scaled 2-norm.
+**RDG**: the scientific formula remains `s = |g|/(Cρ^{4/3})`.
+The helper receives the finite Cartesian gradient directly. For nonzero gradient
+it sets `eg=binary_exponent(max|g|)`, computes the norm `ng` of
+`pow2_scale(g,-eg)`, and uses `fr=binary_fraction(ρ)`,
+`er=binary_exponent(ρ)`, `fc=binary_fraction(cbrt(ρ))`,
+`ec=binary_exponent(cbrt(ρ))`:
+
+```
+s = pow2_scale((ng/fr)/(C*fc), eg-er-ec)
+```
+
+The mantissas are bounded and nonzero, so neither a possibly unrepresentable
+physical gradient norm nor an intermediate `|g|/ρ` is formed. Zero gradient
+returns +0 directly. Only the final exponent restoration may overflow or round
+into subnormals/zero under gradual underflow; a nonfinite final RDG still sets
+bit4 and all formal/diagnostic fields become NaN. This rearrangement does not
+change rho thresholds, eigenvalues, lambda uncertainty budgets or scientific
+formulae. The existing libm `cbrt` accuracy limitation remains.
+Tiny runtime scalar probes of NVHPC26.9 observed intrinsic `SCALE` returning
+Inf/zero at representable large/subnormal endpoints, and `EXPONENT` returning
+-1022 for subnormal bit patterns1/16/64 instead of -1073/-1069/-1067. libc
+`scalbn`/`frexp` and `cbrt` gave the expected probe values. Therefore the same
+portable scaling and bit-based decomposition are used consistently in norms,
+hypot, Jacobi scaling/rescaling, J-inverse condition checks and RDG. Helpers
+require finite IEEE binary64 input; zero has exponent0, and only the fraction
+carries the sign. The FD4 formulas, Jacobi iteration, thresholds and IEEE
+support assumptions are unchanged.
 
 `C = 2(3π²)^{1/3}`: evaluated with Python `decimal` at 80 significant digits
 (π to 100 digits, Newton cube root):
@@ -220,7 +247,7 @@ they are not a formal proof and do not cover FTZ/DAZ or altered rounding modes.
    `|λ_k(A⁰) − d_(k)| ≤ ‖X‖₂`. The rescaled contribution is
    `B_eig = 2ᵉ(1+δ)(r + 2δ·max|d|)`, independent of pivoting order and convergence level.
    `B_eig` alone is not a uniform bound on the returned binary64 eigenvalues:
-   `scale(bs,e)` may underflow to zero while `scale(d,e)` incurs subnormal
+   `pow2_scale(bs,e)` may underflow to zero while `pow2_scale(d,e)` incurs subnormal
    rounding (e.g. a least-subnormal-scaled matrix). The complete point-level
    estimate below also includes rescaling/underflow and bound-arithmetic terms.
 4. **Underflow, eigenvalue rescaling and bound arithmetic.** Under the stated
@@ -275,8 +302,10 @@ Left-handed J are accepted.
 | `core_test_eigen` | Fortran, hooks | known roots, power-of-two scale invariance, decimal/subnormal scaling, extreme ratios, forced nonconvergence, random families vs binary128, bound validity |
 | `core_test_numerics` | Fortran, hooks | constants, stencil set, stencil isolation (NaN outside the 61 points), norms, transform/row-major mapping, condition number, bound vs binary128, RDG extremes |
 | `core_test_eigen_portable` | Fortran FP64, hooks | known roots 1,1,4; one-rotation forced nonconvergence and production 30-rotation convergence; sorted finite eigenvalues and bound |
+| `core_test_rdg_portable` | Fortran FP64, hooks | finite RDG despite quotient/norm intermediate overflow, subnormal gradient norm, zero gradient, genuine final overflow and underflow |
+| `core_test_pow2_portable` | Fortran FP64, hooks | runtime bit-pattern large/subnormal scaling, signed exponent/fraction decomposition, exact norm/hypot, known diagonal eigenvalues and Jinv condition1 |
 
-The three white-box tests need `-DNCI_BUILD_TEST_HOOKS=ON`. CMake first compiles
+The five white-box tests need `-DNCI_BUILD_TEST_HOOKS=ON`. CMake first compiles
 a capability probe for IEEE binary128 (113 binary digits, 128 storage bits).
 Only when available are the original, unchanged `core_test_eigen` and
 `core_test_numerics` plus their quad reference built. Otherwise configuration
@@ -292,8 +321,8 @@ OpenMP-disabled build).
 
 ## Known limitations
 
-- No comparison yet with the independent oracle; the τ margins and tolerances
-  are not frozen.
+- Overall independent-oracle/combined-build acceptance and any freezing of τ
+  margins are recorded in root [status](status.md) and the linked PR evidence.
 - Only complete grids; slabs/tiles/halos return `UNSUPPORTED` (M2).
 - RDG uses libm `cbrt`: values may differ by about one ulp across libm
   implementations (no sign role).
@@ -306,7 +335,7 @@ OpenMP-disabled build).
 - `omp_threads` is unused without OpenMP (gfortran reports an unused dummy
   argument in that configuration).
 
-## Focused correction verification
+## Focused correction verification (first bounded follow-up)
 
 The sequential follow-up corrected bit-4 diagnostic NaNs, negative-extent
 arithmetic ordering and the external-source test path. It added compiler
@@ -324,5 +353,26 @@ No numerical algorithm, Jacobi cap, tolerance or scientific specification change
   independent regressions passed. NVHPC's C-main layout test links with
   target-local `-Mnomain`; production exports and ABI are unchanged.
 
-These focused results are not the root's full joint multi-configuration
-acceptance and do not establish real-density, GPU or performance acceptance.
+These focused results are local evidence; root [status](status.md) and PR
+records own the full joint multi-configuration acceptance. They do not establish
+real-density, GPU or performance acceptance.
+
+## RDG and portable arithmetic follow-up
+
+The later bounded correction replaces the RDG operation order and the
+compiler-dependent binary scaling/decomposition primitives; it does not change
+the scientific formula, FD4/Jacobi algorithms, tolerances or original quad tests.
+
+- GNU13.3 Debug, hooksON: native11/11 passed, including unchanged quad tests,
+  the FP64 RDG range test (9 assertions), and portable endpoint/decomposition
+  test (28 assertions). Endpoint values are loaded through runtime volatile
+  integer bit patterns, avoiding intrinsic constant-folding as an oracle.
+- NVHPC26.9 Debug: native9 passed, 1 explicitly skipped for unavailable binary128;
+  the same FP64 tests, contract, concurrency, fields and inspection passed.
+- Each compiler passed four focused independent ABI regressions from the oracle:
+  genuine RDG overflow, representable large RDG, subnormal constant density with
+  large Jinv, and subnormal nonzero gradient with finite positive RDG.
+
+Old failed NV libraries and scalar-probe logs were retained separately before
+rebuilding. These local results remain distinct from the root's central joint
+acceptance record and from any real-density or GPU acceptance.

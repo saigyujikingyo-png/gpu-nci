@@ -544,6 +544,32 @@ static void test_rdg_overflow_diagnostics(void) {
     grid_free(&g);
 }
 
+static void test_rdg_intermediate_overflow(void) {
+    static const double JI[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const int finite[3] = {0, 0, 0};
+    grid_t g;
+    grid_init(&g, 5, 5, 5, JI, finite, 1);
+    for (int64_t p = 0; p < g.npts; ++p) g.rho[p] = 1.0/64.0;
+    const double a=ldexp(3.0,1017);
+    g.rho[lin(&g,0,2,2)]=0.0;
+    g.rho[lin(&g,1,2,2)]=0.0;
+    g.rho[lin(&g,3,2,2)]=a;
+    g.rho[lin(&g,4,2,2)]=16.0*a;
+    nci_options_v1 o=make_options(NCI_DIAGNOSTIC,1,1e-8,0.0);
+    char err[256];
+    int st=eval_with(&o,&g,err,sizeof err);
+    const int64_t p=lin(&g,2,2,2);
+    const double expected=1.1621759632369337941e308;
+    CHECK(st==NCI_OK,"representable RDG after intermediate overflow status %d: %s",st,err);
+    CHECK((g.flags[p]&31u)==0,"representable RDG centre is valid, flags %u",g.flags[p]);
+    CHECK(isfinite(g.rdg[p]) && fabs(g.rdg[p]/expected-1.0)<1e-14,"representable RDG %.17g",g.rdg[p]);
+    CHECK(g.grad[3*p]==-ldexp(1.0,1018),"large finite gradient retained");
+    CHECK(g.hess[6*p]==-5.0/128.0,"finite Hessian retained");
+    CHECK(g.stats.valid_points==1 && g.stats.numeric_failures==0,"one valid point, no false bit4");
+    check_flag_semantics(&g,finite,o.rho_min,st);
+    grid_free(&g);
+}
+
 int main(void) {
     const int all_per[3] = {1, 1, 1}, mixed_per[3] = {1, 0, 1};
     test_polynomial();
@@ -557,6 +583,7 @@ int main(void) {
     test_random_consistency();
     test_numeric_failure();
     test_rdg_overflow_diagnostics();
+    test_rdg_intermediate_overflow();
     test_all_invalid();
     return test_report("test_fields");
 }

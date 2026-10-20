@@ -243,8 +243,8 @@ contains
       verdict = COND_SINGULAR
       return
     end if
-    e = exponent(amax)
-    a = scale(a, -e)
+    e = binary_exponent(amax)
+    a = pow2_scale(a, -e)
     do k = 1, 3
       cn(k) = fro_norm(3, a(:, k))
     end do
