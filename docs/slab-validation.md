@@ -1,10 +1,10 @@
 # M2 independent slab validation freeze
 
-State: **TESTS_PREPARED_INTEGRATION_NOT_EXECUTED**. This suite was authored
+State: **COMBINED_SYNTHETIC_PASS_MERGE_PENDING**. This suite was authored
 against `docs/slab-contract.md` at base
 `ae80fb929ca5ba12de247a2786117a452ac1e4d6`, before accepting the new production
-backend or runtime. Only independent reference/fixture selfchecks and collection
-have run. No real-density calculation, electronic-structure solver, GPU execution
+backend or runtime. Root subsequently executed the frozen tests against the
+actual core and runtime as recorded below. No real-density calculation, electronic-structure solver, GPU execution
 or performance measurement is included or implied.
 
 ## Independent inputs and gates
@@ -102,6 +102,16 @@ All allocated fixture arrays have at most 693 grid points; huge shape values onl
 appear in deliberately malformed descriptors/cards rejected before allocation.
 
 ## Verification and later integration
+
+Combined execution on 2026-10-20 used root `ae80fb9`, core `4150f34`, runtime
+`fcbecff3` and tests `30917d3`, all clean and unchanged at both ends. GNU Debug
+and Release each passed 18 CTests; NVHPC CPU Debug passed 16 with one documented
+unavailable-binary128 skip. Each configuration passed 84 real CLI e2e checks,
+285 oracle checks with the one existing public Jacobi-hook skip, 46 CLI protocol
+checks and 21 native-driver checks. No slab integration case was skipped and
+no tolerance changed. Exact full revisions and boundaries are in the root
+integration branch's [status](status.md). The following preparation record is
+preserved as history and must not be substituted for that execution evidence.
 
 The dedicated WSL Python is `/opt/gpu-nci-dev-20261020/bin/python` in
 Ubuntu-24.04. The original freeze at
