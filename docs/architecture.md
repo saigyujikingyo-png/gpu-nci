@@ -5,8 +5,8 @@ checks and were merged with user approval; see [acceptance status](status.md).
 The offline CLI and native adapter pass combined synthetic checks under the
 [versioned integration protocol](cli-contract.md) and are merged. CPU X-slab
 support follows the [M2 contract](slab-contract.md) and passes combined synthetic
-checks in separate review branches, pending merge. The GPU NCI backend remains
-planned.
+checks and is merged. An isolated [M3A device portability probe](openacc-probe-contract.md)
+precedes the public GPU backend, which remains unimplemented.
 
 ```mermaid
 flowchart LR
@@ -66,7 +66,7 @@ The CLI exclusively creates a new output directory. The worker's tracked
 arrays are covered by a checked allocation budget before the reader allocates
 density. This accounting includes output fields, diagnostics, atom data, CPU
 neighbor tables and an explicit allowance; it is not a whole-process RSS cap.
-The reviewed M2 scheduler supports full-grid or sequential X-slab execution.
+The merged M2 scheduler supports full-grid or sequential X-slab execution.
 It keeps the complete density and buffers one slab's halo and output fields,
 then appends fields in global order. It does not provide out-of-core input.
 The actual origin and axis vectors must equal the declared binary64 geometry.
@@ -93,7 +93,7 @@ information exists. See [numerics](numerics.md) and [ABI](abi.md).
 
 GNU and NVIDIA Fortran always use separate module/build directories. CPU
 configuration works without the NVIDIA SDK. The unchanged ABI supports complete
-dense grids and, in the reviewed M2 backend, canonical X slabs with complete Y/Z.
+dense grids and canonical X slabs with complete Y/Z in the merged M2 backend.
 Other partial layouts remain unsupported. Global periodic wrapping and
 mixed-derivative corner halos are covered by independent finite fixtures.
 

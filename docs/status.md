@@ -1,6 +1,6 @@
 # Acceptance status
 
-Updated 2026-10-20.
+Updated 2026-10-21 (Europe/London).
 
 | Item | Status | Evidence boundary |
 |---|---|---|
@@ -12,13 +12,14 @@ Updated 2026-10-20.
 | Independent numerical oracle | Merged PR #1, actual-library PASS | 113 passed / 1 documented skip on each of three built libraries |
 | Strict CUBE reader | Merged PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
 | Reader-to-ABI adapter and offline CLI | Merged PR #4/#5/#6/#7, synthetic PASS | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
-| CPU X-slab execution | Review branches implemented, combined synthetic PASS, merge pending | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
+| CPU X-slab execution | Merged PR #8/#9/#10/#11, combined and complete-tree synthetic PASS | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
+| M3A OpenACC numerical portability | Contract prepared, NOT_TESTED | Isolated device probe; production GPU backend remains absent |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |
 
-Merged main `c77d4ed` supports complete dense grids. The reviewed M2 branches
-extend the same ABI to canonical X slabs; other partial layouts remain rejected.
+Merged main `a1ebe23` supports complete dense grids and canonical X slabs under
+the same ABI; other partial layouts remain rejected.
 Initial results retain scientific-uncertainty flags until independent input
 quantization and grid-convergence information is available.
 
@@ -124,7 +125,7 @@ and unchanged before/after execution. Integrated CI and subsequent
 [main CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39506644743)
 passed. Old worktrees, branches and source evidence remain preserved.
 
-## M2 CPU X-slab synthetic acceptance (unmerged)
+## M2 CPU X-slab synthetic acceptance
 
 Actual execution on 2026-10-20 used four clean revisions, unchanged at entry and
 exit: root `ae80fb929ca5ba12de247a2786117a452ac1e4d6`,
@@ -165,9 +166,20 @@ The C ABI structure, exported symbols, numerical evaluator, 61-point stencil,
 thresholds and uncertainty policy are unchanged. The CLI retains the full rho
 array and buffers only one slab's additional input and output fields. This is
 not out-of-core input and its tracked allocation allowance is not a whole-process
-RSS cap. Main remains unchanged until the reviewed branches are approved for
-merge. OpenMP scaling, GPU-NCI fields, real-density acceptance and speedup remain
+RSS cap. OpenMP scaling, GPU-NCI fields, real-density acceptance and speedup remain
 NOT_RUN. Reproduction commands are in [integration](integration.md).
+
+Following explicit approval, #9, #10 and #11 were merged into #8 in that order.
+The complete integration tree `1f118a1dc1504bfbe4b12228e0023c7fad852157` then passed
+all 18 GNU Debug CTests using only its own default source paths: CLI 46, native
+21, e2e 84 and oracle 285 passed with the same one public-hook oracle skip.
+Both numerical test-hook suites were present, and GNU binary128 tests ran.
+Clean source state, source/binary hashes and raw outputs were retained.
+[Integrated CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39511987296)
+passed before #8 was merged into main `a1ebe23c5f56b2df143ee99aca8ac88497861fa0`.
+The main file tree equals that tested integration exactly, and
+[main CI](https://github.com/saigyujikingyo-png/gpu-nci/actions/runs/39512518654)
+also passed. Earlier dependency failures and old worktrees remain preserved.
 
 AI-assisted development: Claude Opus 5.5 max authored the initial CPU core;
 GPT-6.1 Sol implemented the independent oracle, input reader and bounded

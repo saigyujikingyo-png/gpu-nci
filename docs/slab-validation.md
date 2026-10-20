@@ -1,6 +1,6 @@
 # M2 independent slab validation freeze
 
-State: **COMBINED_SYNTHETIC_PASS_MERGE_PENDING**. This suite was authored
+State: **MERGED_SYNTHETIC_PASS**. This suite was authored
 against `docs/slab-contract.md` at base
 `ae80fb929ca5ba12de247a2786117a452ac1e4d6`, before accepting the new production
 backend or runtime. Root subsequently executed the frozen tests against the
