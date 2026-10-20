@@ -1,0 +1,22 @@
+name: CPU development checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+        if: hashFiles('requirements-dev.txt') != ''
+      - name: Build and run synthetic checks
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPython3_EXECUTABLE=$(command -v python)
+          cmake --build build
+          ctest --test-dir build --output-on-failure
