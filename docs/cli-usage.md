@@ -12,6 +12,15 @@ to the invocation directory. The output parent must already exist, and the run
 directory must be new. There is no overwrite or resume mode. Original inputs and
 cards are left intact. All runtime dependencies are from the Python standard library.
 
+Legacy `compute.layout="full_grid"` cards keep their original keys. To request
+bounded X slabs, set `compute.layout="x_slabs"` and add `slab_planes` as an integer
+from 1 through Nx. The extra key is forbidden in full-grid cards. See the exact
+[slab contract](slab-contract.md) for halo and memory rules. The final block is
+shortened to the remaining X planes; the requested block size is never adapted
+or retried. Manifest shapes and raw file ordering always describe the global grid.
+The complete density is still held in memory: this reduces field-buffer storage,
+and is not an out-of-core reader or a performance claim.
+
 The CLI freezes card bytes and streams a verified input snapshot, writes the
 validated Fortran namelist, obtains native build declarations, fingerprints the
 driver/library, and runs the worker with its declared timeout. Logs, partial

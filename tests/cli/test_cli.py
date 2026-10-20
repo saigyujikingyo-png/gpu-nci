@@ -159,6 +159,48 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(text.count("&nci_run"), 1)
         self.assertNotIn(self.card["input"]["source"]["settings"], text)
 
+    def test_slab_compute_exact_schema(self):
+        self.card['compute'].update(layout='x_slabs', slab_planes=1)
+        self.assertEqual(MODULE.validate_card(self.card), 315)
+        for value in (None, True, 0, -1, 6, 1.0, '1', 1 << 63):
+            card = copy.deepcopy(self.card)
+            card['compute']['slab_planes'] = value
+            self.rejected(card)
+        del self.card['compute']['slab_planes']
+        self.rejected(self.card)
+
+    def test_full_grid_forbids_slab_planes(self):
+        self.card['compute']['slab_planes'] = 0
+        self.rejected(self.card)
+
+    def test_slab_namelist_and_legacy_defaults(self):
+        legacy = MODULE.namelist(self.card).decode()
+        self.assertNotIn('layout_mode', legacy)
+        self.assertNotIn('slab_planes', legacy)
+        self.card['compute'].update(layout='x_slabs', slab_planes=3)
+        slab = MODULE.namelist(self.card).decode()
+        self.assertIn('layout_mode = 1,', slab)
+        self.assertIn('slab_planes = 3,', slab)
+        self.assertIn('max_points = 1000,', slab)
+
+    def test_slab_budget_exact_boundary_both_modes(self):
+        for mode, q in (('full', 25), ('diagnostic', 97)):
+            for block in (1, 3, 5):
+                card = copy.deepcopy(self.card)
+                card['compute'].update(layout='x_slabs', slab_planes=block, output_mode=mode)
+                expected = 8*315 + 8*(block+4)*63 + q*block*63 + 40*(block+7+9) + 8192 + 65536 + 4096
+                card['limits']['memory_budget_bytes'] = expected
+                self.assertEqual(MODULE.memory_lower_bound(card, 315), expected)
+                self.assertEqual(MODULE.validate_card(card), 315)
+                card['limits']['memory_budget_bytes'] -= 1
+                self.rejected(card)
+
+    def test_slab_budget_checks_halo_and_output_products(self):
+        self.card['grid']['shape'] = [5, 5, MODULE.INT64_MAX // 1200]
+        self.card['limits'].update(max_points=MODULE.INT64_MAX, memory_budget_bytes=MODULE.INT64_MAX)
+        self.card['compute'].update(layout='x_slabs', slab_planes=5, output_mode='diagnostic')
+        self.rejected(self.card)
+
 
 @unittest.skipIf(os.name == "nt", "synthetic executable uses a POSIX shebang; run under WSL")
 class ComponentTests(unittest.TestCase):
@@ -233,6 +275,16 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual(hess["component_order"], ["xx", "yy", "zz", "xy", "xz", "yz"])
         self.assertEqual(hess["bytes"], 315 * 48)
         self.assertEqual(hess["unit"], "electron/bohr^5")
+
+    def test_slab_card_preserves_global_manifest_and_raw_shapes(self):
+        self.card['compute'].update(layout='x_slabs', slab_planes=3, output_mode='diagnostic')
+        result, manifest = self.execute()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(manifest['compute'], self.card['compute'])
+        self.assertEqual(manifest['outputs']['rdg.f64']['shape'], [5, 7, 9])
+        self.assertEqual(manifest['outputs']['hess.f64']['shape'], [5, 7, 9, 6])
+        self.assertEqual(manifest['outputs']['flags.u8']['bytes'], 315)
+        self.assertIn('slab_planes = 3', (self.output / 'settings.nml').read_text())
 
     def test_existing_output_untouched(self):
         self.output.mkdir()
