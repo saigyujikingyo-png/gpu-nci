@@ -24,3 +24,27 @@ small synthetic fixtures. Report any skipped cases explicitly.
 Require an independent read-only review of the code and meaningful failure
 tests before promoting the first CPU milestone. Do not convert this status
 into scientific acceptance of a real density file.
+
+For the adapter/CLI milestone the original CPU and oracle now reside in the
+root checkout. Add the independently owned worker, CLI and tests as follows:
+
+```sh
+cmake -S /path/to/root -B build-cli-integration -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DNCI_BUILD_TEST_HOOKS=ON \
+  -DNCI_IO_SOURCE_DIR=/path/to/adapter/src/io \
+  -DNCI_DRIVER_SOURCE_DIR=/path/to/cli/src/driver \
+  -DNCI_CLI_DIR=/path/to/cli/cli \
+  -DNCI_CLI_TEST_DIR=/path/to/cli/tests/cli \
+  -DNCI_E2E_DIR=/path/to/e2e/tests/e2e \
+  -DNCI_BUILD_REVISION="explicit clean source revisions" \
+  -DPython3_EXECUTABLE=/path/to/venv/bin/python
+cmake --build build-cli-integration --parallel 2
+ctest --test-dir build-cli-integration -V
+```
+
+Record clean, unchanged HEAD/status for all four checkouts before and after the
+run. Require real `nci_driver` and CLI end-to-end tests in the CTest inventory;
+stub-worker CLI tests alone are not integration evidence. Use a fresh build
+directory per compiler/configuration and preserve failures. An omitted build
+revision is reported as UNKNOWN. Build metadata is a declaration, not a signed
+attestation of the source-to-binary relationship.

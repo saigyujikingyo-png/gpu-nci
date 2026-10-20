@@ -22,6 +22,17 @@ program cube_probe
     read(argument,*,iostat=ios) limits%max_points
     if (ios/=0) error stop 'invalid test point budget'
   end if
+  if (command_argument_count()>=7) then
+    call get_command_argument(5,argument)
+    read(argument,*,iostat=ios) limits%reserve_bytes_per_point
+    if (ios/=0) error stop 'invalid test per-point reservation'
+    call get_command_argument(6,argument)
+    read(argument,*,iostat=ios) limits%reserve_bytes_per_axis_node
+    if (ios/=0) error stop 'invalid test per-axis-node reservation'
+    call get_command_argument(7,argument)
+    read(argument,*,iostat=ios) limits%reserve_fixed_bytes
+    if (ios/=0) error stop 'invalid test fixed reservation'
+  end if
   call read_cube(trim(path),grid,status,limits)
   write(*,'(a,1x,i0)') 'STATUS',status%code
   write(*,'(a,1x,i0)') 'LINE',status%line
