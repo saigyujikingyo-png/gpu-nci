@@ -62,7 +62,8 @@ def synthetic_evidence(directory):
         stdout.write_bytes(encode(result,marker))
         stderr.write_text("launch CUDA kernel SELFTEST\nupload SELFTEST\ndownload SELFTEST\n")
         evidence[name]=dict(binary=receipt(binary),stdout=receipt(stdout),stderr=receipt(stderr),
-                            returncode=0,command=[str(binary)])
+                            returncode=0,input_mode="argument",input=receipt(directory/"input.m3a1"),
+                            command=[str(binary),str(directory/"input.m3a1")])
     compiler=directory/"compiler.log";compiler.write_text("SELFTEST ONLY NOT A COMPILER RUN\n")
     evidence["compiler_report"]=receipt(compiler)
     evidence["runtime_evidence"]=evidence["device"]["stderr"]

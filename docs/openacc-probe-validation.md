@@ -67,6 +67,8 @@ The executed evidence JSON schema is:
     "stdout": {"path": "/absolute/host.stdout", "sha256": "64 lowercase hex digits", "bytes": 123},
     "stderr": {"path": "/absolute/host.stderr", "sha256": "64 lowercase hex digits", "bytes": 0},
     "returncode": 0,
+    "input_mode": "argument",
+    "input": {"path": "/absolute/input.m3a1", "sha256": "64 lowercase hex digits", "bytes": 22024},
     "command": ["/absolute/host", "/absolute/input.m3a1"]
   },
   "device": {
@@ -74,7 +76,10 @@ The executed evidence JSON schema is:
     "stdout": {"path": "/absolute/device.stdout", "sha256": "64 lowercase hex digits", "bytes": 123},
     "stderr": {"path": "/absolute/device.stderr", "sha256": "64 lowercase hex digits", "bytes": 123},
     "returncode": 0,
-    "command": ["/absolute/device", "/absolute/input.m3a1"]
+    "input_mode": "stdin",
+    "input": {"path": "/absolute/input.m3a1", "sha256": "64 lowercase hex digits", "bytes": 22024},
+    "stdin": {"path": "/absolute/input.m3a1", "sha256": "64 lowercase hex digits", "bytes": 22024},
+    "command": ["/absolute/device"]
   },
   "device_count": 1,
   "device_identity": "actual NVIDIA identity recorded by the private runner",
@@ -85,8 +90,25 @@ The executed evidence JSON schema is:
 
 All receipts have exactly path/sha256/bytes; paths are absolute, SHA-256 values
 must be lowercase and sizes/returncodes/device_count must be integers, not bool.
-The command's first argument must resolve to its binary. Output arguments must
-bind to the matching stdout receipt. Runtime evidence must bind to device stderr
+Every host/device run requires explicit `input_mode` (`stdin` or `argument`) and
+its own complete `input` receipt. That receipt must exactly equal the top-level
+frozen input receipt, including path, SHA-256 and byte count; another path with
+identical content is insufficient. Commands must match the canonical receipt
+paths exactly, without extra arguments:
+
+- In argument mode, command is exactly `[binary_path, frozen_input_path]`.
+  A `stdin` key is forbidden, even if null. The runner supplies no input stream
+  (`DEVNULL`), avoiding inherited stdin.
+- In stdin mode, command is exactly `[binary_path]`. An additional complete
+  `stdin` receipt must exactly equal that run's `input` receipt. The runner reads
+  the <=8 MiB frozen input into bytes, hashes that actual payload for this receipt
+  before launch, then uses PIPE and `communicate(input=payload, timeout=30)`.
+  An inherited stream or a receipt made only by rehashing the file after execution
+  does not provide the required actual-payload provenance.
+
+Both modes are independent per run. The verifier checks declared evidence; the
+private runner owns actual input delivery and its provenance. The output arguments
+must bind to the matching stdout receipt. Runtime evidence must bind to device stderr
 and contain a kernel-launch line plus upload and download messages, for example
 the actual NVHPC `NVCOMPILER_ACC_NOTIFY=3` log. A DEVICE=1 marker alone cannot pass.
 The compiler report is retained and hashed; exact compiler flag, source adapter
@@ -107,7 +129,7 @@ Pure development validation:
 
 ```text
 python -m pytest -q tests/openacc_probe
-97 passed
+145 passed
 ```
 
 These checks use invented protocol output, placeholder files explicitly named
@@ -121,6 +143,13 @@ relation drift, missing kernel or transfers, changed binary/input/gates, absent
 device identity/count, unbound runtime evidence and nonzero exits. Separate
 checks retain permitted raw sign differences inside the fixed band and verify
 NOT_TESTED/FAILED exit codes and refusal to overwrite an existing report.
+The evidence-binding follow-up adds positive checks for all host/device mode
+combinations and negative checks on each run for missing mode/input receipt,
+inherited mode, substituted same-content path, wrong hash, missing/wrong argv,
+extra arguments, missing command, absent/substituted/wrong-hash stdin receipt,
+and a forbidden null stdin key in argument mode. The original completion run
+had 97 pure checks; the strengthened schema adds 48. No numerical gate, source
+oracle, manifest or native input changed.
 
 The frozen corpus commit is `ee5489078fa8bcaf8107d7d93b6de09d99ad6cf7`.
 No candidate host/device binary, scientific solver or benchmark was executed by

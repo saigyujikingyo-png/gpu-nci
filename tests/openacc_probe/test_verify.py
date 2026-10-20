@@ -123,6 +123,70 @@ def test_evidence_hash_pipeline_preserves_all_originals(tmp_path):
     assert all(p.read_bytes()==content for p,content in before.items())
 
 
+@pytest.mark.parametrize("host_mode", ["stdin","argument"])
+@pytest.mark.parametrize("device_mode", ["stdin","argument"])
+def test_each_run_explicitly_binds_frozen_input_in_both_modes(tmp_path,host_mode,device_mode):
+    e=synthetic_evidence(tmp_path)
+    for name,mode in (("host",host_mode),("device",device_mode)):
+        run=e[name];run["input_mode"]=mode
+        run["input"]=dict(e["input"])
+        run["command"]=[run["binary"]["path"]]+([e["input"]["path"]] if mode=="argument" else [])
+        if mode=="stdin":run["stdin"]=dict(run["input"])
+    save_evidence(tmp_path,e)
+    assert verify_files(*paths(tmp_path))["state"]=="PASS"
+
+
+@pytest.mark.parametrize("name", ["host","device"])
+@pytest.mark.parametrize("mode", ["stdin","argument"])
+@pytest.mark.parametrize("mutation", ["missing_input_mode","inherited_mode","missing_input_receipt",
+    "wrong_path_same_content","wrong_digest","missing_argv","wrong_argv","extra_args",
+    "missing_command"])
+def test_per_run_input_binding_cannot_be_inferred_or_substituted(tmp_path,name,mode,mutation):
+    e=synthetic_evidence(tmp_path);run=e[name]
+    run["input_mode"]=mode;run["input"]=dict(e["input"])
+    run["command"]=[run["binary"]["path"]]+([e["input"]["path"]] if mode=="argument" else [])
+    if mode=="stdin":run["stdin"]=dict(run["input"])
+    alternate=tmp_path/"different path identical input.m3a1"
+    alternate.write_bytes((tmp_path/"input.m3a1").read_bytes())
+    if mutation=="missing_input_mode":del run["input_mode"]
+    elif mutation=="inherited_mode":run["input_mode"]="inherit"
+    elif mutation=="missing_input_receipt":del run["input"]
+    elif mutation=="wrong_path_same_content":
+        run["input"]=receipt(alternate)
+        if mode=="argument":run["command"][1]=str(alternate)
+    elif mutation=="wrong_digest":run["input"]["sha256"]="0"*64
+    elif mutation=="missing_argv":run["command"]=[run["binary"]["path"]] if mode=="argument" else []
+    elif mutation=="wrong_argv":
+        if mode=="argument":run["command"][1]=str(alternate)
+        else:run["command"][0]="/different/binary"
+    elif mutation=="extra_args":run["command"].append("--unfrozen-extra")
+    else:del run["command"]
+    save_evidence(tmp_path,e)
+    with pytest.raises(Rejected):verify_files(*paths(tmp_path))
+
+
+@pytest.mark.parametrize("name", ["host","device"])
+@pytest.mark.parametrize("mutation", ["missing","wrong_path_same_content","wrong_digest"])
+def test_stdin_payload_receipt_must_match_exact_run_input(tmp_path,name,mutation):
+    e=synthetic_evidence(tmp_path);run=e[name]
+    run.update(input_mode="stdin",command=[run["binary"]["path"]],stdin=dict(run["input"]))
+    if mutation=="missing":del run["stdin"]
+    elif mutation=="wrong_path_same_content":
+        alternate=tmp_path/"identical stdin payload different path.m3a1"
+        alternate.write_bytes((tmp_path/"input.m3a1").read_bytes())
+        run["stdin"]=receipt(alternate)
+    else:run["stdin"]["sha256"]="0"*64
+    save_evidence(tmp_path,e)
+    with pytest.raises(Rejected):verify_files(*paths(tmp_path))
+
+
+@pytest.mark.parametrize("name", ["host","device"])
+def test_argument_mode_forbids_even_null_stdin_key(tmp_path,name):
+    e=synthetic_evidence(tmp_path);e[name]["stdin"]=None
+    save_evidence(tmp_path,e)
+    with pytest.raises(Rejected):verify_files(*paths(tmp_path))
+
+
 @pytest.mark.parametrize("mutation", ["exit","binary_hash","input_hash","manifest_gate",
     "marker_only","no_upload","no_download","no_count","no_identity","command_binding",
     "runtime_binding","schema_bool","empty_binary"])

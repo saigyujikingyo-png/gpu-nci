@@ -276,9 +276,19 @@ def verify_files(manifest_path,input_path,host_output,device_output,evidence_pat
         require(type(run["returncode"]) is int and run["returncode"]==0,f"{key}: process exit")
         binary=check(run["binary"])
         require(run["binary"]["bytes"]>0,f"{key}: empty binary receipt")
-        require(type(run["command"]) is list and len(run["command"])>0 and
-                all(type(x) is str for x in run["command"]) and
-                Path(run["command"][0]).resolve()==binary,f"{key}: binary command binding")
+        mode=run.get("input_mode")
+        require(mode in ("stdin","argument"),f"{key}: explicit input_mode required")
+        check(run.get("input"))
+        require(run["input"]==evidence["input"],f"{key}: run input must equal frozen input receipt")
+        expected_command=[str(binary)]
+        if mode=="argument":
+            require("stdin" not in run,f"{key}: argument mode forbids stdin receipt")
+            expected_command.append(evidence["input"]["path"])
+        else:
+            check(run.get("stdin"))
+            require(run["stdin"]==run["input"],f"{key}: stdin payload must equal run input receipt")
+        require(run.get("command")==expected_command,
+                f"{key}: command must exactly bind binary and {mode} frozen input")
         require(check(run["stdout"])==Path(output).resolve(),f"{key}: output receipt binding")
         check(run["stderr"])
     compiler=check(evidence["compiler_report"])
