@@ -168,10 +168,12 @@ fingerprints, worker return code, native receipt and output file sizes/hashes.
 Unknown scientific uncertainty is recorded; success is numerical completion only.
 The exact top-level manifest keys are `schema_version`, `state`, `stage`,
 `message`, `card`, `input`, `grid`, `metadata`, `compute`, `limits`, `source`,
-`build`, `binaries`, `worker`, `native`, `settings`, `outputs`, `scientific`.
+`build`, `build_probe`, `binaries`, `worker`, `native`, `settings`, `outputs`, `scientific`.
 `card` is `{path,sha256,bytes}`; `input` adds `snapshot:"input.cube"` to those
 keys. `grid/metadata/compute/limits/source` retain the card declarations.
-`build` is the build-info object; `binaries` has `driver` and `backend_library`
+`build` is the build-info object; `build_probe` records
+`{returncode,timed_out,timeout_seconds}` (null before the probe).
+`binaries` has `driver` and `backend_library`
 objects, each `{path,sha256,bytes}`. `worker` is
 `{returncode,timed_out,timeout_seconds}`; `native` is the native receipt;
 `settings` is `{path:"settings.nml",sha256,bytes}`. Unknown objects on failure
