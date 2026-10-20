@@ -123,18 +123,30 @@ finite evaluator path and compiler/device configuration.
 ## Gate before the public GPU backend
 
 OpenACC's error callback is not recovery: NVIDIA documents undefined behavior
-if it returns after a fatal runtime error. A subprocess can protect the CLI
-parent but does not satisfy the existing direct C ABI requirement to return a
-status without aborting. Before public dispatch, separately settle device
-allocation/failure handling, host/device budgets, per-context state, output
-commit behavior and device-origin failure diagnostics. Do not advertise an
-OpenACC public backend while this remains unresolved.
+if it returns after a fatal runtime error. The existing ABI forbids NCI from
+using STOP, exceptions or external I/O; it does not promise recovery from every
+OS, driver or hardware failure. Keep NCI-detectable input/configuration failures,
+explicit work-buffer allocation failures and pointwise numeric failures on the
+existing status/errbuf paths. Unrecoverable platform or third-party runtime
+failure may terminate a process; the existing CLI worker boundary must classify
+that as failure, never SUCCESS or CPU fallback. This distinction is not an
+excuse for invalid mapping, out-of-bounds code or reproducible crashes on valid
+supported input.
+
+The documented `acc_malloc` null-device-pointer result is a candidate for
+checked explicit allocation with paired `acc_free`; its actual failure/cleanup
+path still needs a bounded development test. Before public dispatch, separately
+freeze and validate host/device budgets, per-context state, synchronous output
+commit behavior and device-origin failure diagnostics. M3A does not implement
+these, and no public backend is advertised. This keeps the planned OpenACC
+route without claiming that an error callback can recover fatal errors.
 
 Primary references:
 
 - [NVHPC LIBM device module](https://docs.nvidia.com/hpc-sdk/compilers/cuda-fortran-prog-guide/index.html#libm-device-module)
 - [NVIDIA mathematical function accuracy](https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#mathematical-functions)
 - [NVHPC 26.9 OpenACC error handling](https://docs.nvidia.com/hpc-sdk/archive/26.9/compilers/openacc-gs/index.html#openacc-error-handling)
+- [NVHPC 26.9 explicit allocation](https://docs.nvidia.com/hpc-sdk/archive/26.9/compilers/openacc-gs/index.html#acc-malloc)
 - [NVHPC 26.9 compiler guide](https://docs.nvidia.com/hpc-sdk/archive/26.9/compilers/hpc-compilers-user-guide/index.html)
 
 AI assistance is recorded with implementation evidence: Astra architecture and
