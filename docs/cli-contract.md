@@ -103,7 +103,9 @@ The private executable invocation is:
 Python writes real values with 17 significant digits and Fortran-compatible
 exponents. Only validated enums enter quoted namelist strings. The worker
 validates its own protocol and values. It compares actual shape exactly and
-actual origin/J elementwise within 16*epsilon*max(1,abs(actual),abs(declared)).
+actual origin/J elementwise by parsed binary64 numerical equality. The 17-digit
+namelist serialization round-trips these declarations. No absolute epsilon
+floor is permitted: it could hide a factor-of-two change to a very small J.
 It validates metadata using the same negative tolerance passed to the ABI.
 
 Reader limits gain nonnegative int64 reservations (default zero, preserving
@@ -140,7 +142,9 @@ object with `total`, `valid`, `invalid`, `numeric_failures`, `bit_counts` array
 of seven integers). Success requires abi_status=0 and valid+invalid=total=N.
 Numerical failure (ABI status 4) may retain raw diagnostics for inspection but
 must exit nonzero, state failed, and never produce SUCCESS. Expected boundary
-and low-density masks alone are not failed evaluation. Invalid source/metadata,
+and low-density masks do not fail evaluation when at least one valid point
+remains. A zero-valid-point field follows the existing ABI status 3 and fails
+without SUCCESS. Invalid source/metadata,
 memory, numerical and IO failures have distinguishable stage/message fields.
 
 `nci_driver --build-info` emits one JSON object to stdout, then exits 0, with
