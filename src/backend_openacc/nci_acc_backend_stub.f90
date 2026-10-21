@@ -3,13 +3,14 @@
 !> compiled into nci_cpu instead of nci_acc_backend.f90. The common C API is
 !> the same source in both libraries; here ACC_BACKEND_COMPILED is false, so
 !> option validation rejects NCI_OPENACC exactly as before and no entry below
-!> is reached through the C ABI. Every entry reports BACKEND_UNAVAILABLE (6)
-!> with null or zero outputs and ignores its inputs. Nothing here references
-!> the OpenACC runtime.
+!> is reached through the C ABI. The backend entries report
+!> BACKEND_UNAVAILABLE (6); the private test hooks report rc 1, because no
+!> handle here is an OpenACC context. Outputs are null or zero and inputs are
+!> ignored. Nothing here references the OpenACC runtime.
 module nci_acc_backend
   use, intrinsic :: iso_c_binding, only: c_ptr, c_null_ptr, c_int, c_int32_t, c_int64_t
   use nci_kinds, only: dp, i8, i64
-  use nci_abi, only: NCI_BACKEND_UNAVAILABLE
+  use nci_abi, only: NCI_INVALID_ARGUMENT, NCI_BACKEND_UNAVAILABLE
   use nci_validate, only: message_t, msg_set, tile_layout
   implicit none
   private
@@ -21,7 +22,7 @@ module nci_acc_backend
   integer, parameter, public :: ACC_ACQUISITIONS = 18
   integer, parameter, public :: ACC_FIXED_STORAGE_ITEMS = 4
 
-  public :: acc_backend_create, acc_backend_destroy, acc_backend_begin, acc_backend_plan
+  public :: acc_backend_create, acc_backend_destroy, acc_backend_admit, acc_backend_plan
   public :: acc_backend_evaluate, acc_test_configure, acc_test_observe, acc_fixed_storage
 
   character(len=*), parameter :: UNAVAILABLE = 'the OpenACC backend is not available in this library'
@@ -45,13 +46,13 @@ contains
     call msg_set(msg, UNAVAILABLE)
   end subroutine acc_backend_destroy
 
-  recursive subroutine acc_backend_begin(handle, status, msg)
+  recursive subroutine acc_backend_admit(handle, status, msg)
     type(c_ptr), intent(in) :: handle
     integer(c_int), intent(out) :: status
     type(message_t), intent(inout) :: msg
     status = NCI_BACKEND_UNAVAILABLE
     call msg_set(msg, UNAVAILABLE)
-  end subroutine acc_backend_begin
+  end subroutine acc_backend_admit
 
   recursive subroutine acc_backend_plan(handle, lay, diagnostic, status, msg)
     type(c_ptr), intent(in) :: handle
@@ -89,7 +90,7 @@ contains
     type(c_ptr), intent(in) :: handle
     integer(c_int32_t), intent(in) :: failure_at, corruption
     integer(c_int32_t), intent(out) :: rc
-    rc = NCI_BACKEND_UNAVAILABLE
+    rc = NCI_INVALID_ARGUMENT
   end subroutine acc_test_configure
 
   recursive subroutine acc_test_observe(handle, values, events, n_events, rc)
@@ -100,7 +101,7 @@ contains
     values = 0
     events = 0
     n_events = 0
-    rc = NCI_BACKEND_UNAVAILABLE
+    rc = NCI_INVALID_ARGUMENT
   end subroutine acc_test_observe
 
   !> No OpenACC context storage exists in this library.

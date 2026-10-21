@@ -17,15 +17,18 @@
 !>   tables, poisons and uploads the outputs and metadata, runs one
 !>   synchronous kernel of the production classify_point/point_eval, poisons
 !>   the host copies again and downloads and validates every marker, status,
-!>   rotation count, flag and field. It then unmaps and frees every device
-!>   allocation, frees the input and metadata arrays, moves the field and
-!>   flag arrays to call-local staging, restores the caller's device
-!>   selection and only then writes the caller's arrays.
+!>   rotation count, flag and field. It then unmaps (absence confirmed) and
+!>   frees every device allocation, frees the input and metadata arrays,
+!>   moves the field and flag arrays to call-local staging, restores the
+!>   caller's device selection and only then writes the caller's arrays. The
+!>   staging is released by the automatic deallocation at the return of the
+!>   committing routine, which has no returning failure path.
 !> * Allocation failure: clean unwind, status 5, context reusable. Rejected
 !>   device result: clean unwind, status 6, nothing written. A presence query
 !>   contradicting a completed map or unmap, or a failed host deallocation,
-!>   stops at once, keeps everything still owned and marks the context
-!>   broken (status 6 now and from every later call, destroy included).
+!>   stops at once before any output is written, keeps everything still
+!>   owned and marks the context broken (status 6 now and from every later
+!>   call, destroy included). No status 6 follows a write of caller arrays.
 !> * No I/O, no STOP, no OpenACC error callback: a fatal runtime error ends
 !>   the process (the worker boundary). There is no CPU fallback.
 module nci_acc_backend
@@ -57,7 +60,7 @@ module nci_acc_backend
   integer, parameter, public :: ACC_ACQUISITIONS = 18
   integer, parameter, public :: ACC_FIXED_STORAGE_ITEMS = 4
 
-  public :: acc_backend_create, acc_backend_destroy, acc_backend_begin, acc_backend_plan
+  public :: acc_backend_create, acc_backend_destroy, acc_backend_admit, acc_backend_plan
   public :: acc_backend_evaluate, acc_test_configure, acc_test_observe, acc_fixed_storage
 
   !> The nine tracked objects, in acquisition order.
@@ -80,8 +83,6 @@ module nci_acc_backend
                         V_DOWNLOAD_BYTES = 18, V_FAIL_INDEX = 19, V_FAIL_STATUS = 20, &
                         V_FAIL_NROT = 21, V_MARKERS = 22, V_BROKEN = 23, V_EVENTS = 24
   integer(i64), parameter :: SCHEMA_VERSION = 1
-  !> backend_status before (or without) a backend evaluation in this call.
-  integer(i64), parameter :: NOT_EVALUATED = -1
 
   integer(i64), parameter :: WS_MAGIC = int(z'4E43495F41434331', i64)
   !> M3B0's inspection of the installed runtime found a 32-bit byte count in
@@ -100,14 +101,18 @@ module nci_acc_backend
     + 11*storage_size(0.0_dp, i64) + 5*storage_size(.true., i64))/8
 
   !> Poison written to host staging and metadata before each upload and each
-  !> download. The field poison is a quiet NaN distinct from the canonical
-  !> NaN that the kernel writes; flags -1 sets bit 7, which no flag uses.
-  integer(i64), parameter :: FIELD_POISON_BITS = int(z'7FF8000000000BAD', i64)
-  integer(i8), parameter :: FLAG_POISON = -1_i8
+  !> download: fields the quiet NaN 7FF800000000DEAD, distinct from the
+  !> canonical QNAN_BITS that the kernel writes; flags the bit pattern A5
+  !> (bit 7 is used by no flag); status and nrot INT32_MIN; marker -1.
+  integer(i64), parameter :: FIELD_POISON_BITS = int(z'7FF800000000DEAD', i64)
+  integer(i8), parameter :: FLAG_POISON = int(int(z'A5', i32) - 256_i32, i8)
   integer(i32), parameter :: INT_POISON = -huge(0_i32) - 1_i32
+  integer(i32), parameter :: MARKER_POISON = -1
   integer(i32), parameter :: STATUS_CLASSIFIED_INVALID = -1
   integer(i32), parameter :: MARKER_ON_DEVICE = 1
   integer(i32), parameter :: MAX_CORRUPTION = 2
+  !> Test corruption 2 sets the downloaded status of output point 1 to this.
+  integer(i32), parameter :: CORRUPT_STATUS = INT_POISON + 1_i32
   !> Flags of a classified-invalid point use only bits 0-3.
   integer, parameter :: CLASSIFIED_FLAGS_MAX = 15
 
@@ -204,6 +209,8 @@ contains
 
   !> Releases a healthy workspace (it owns nothing between evaluations).
   !> A broken workspace is kept, with everything it still owns: status 6.
+  !> So is one whose deallocation fails: its magic is never cleared, so the
+  !> handle that the C API keeps stays a valid, now broken, workspace.
   recursive subroutine acc_backend_destroy(handle, status, msg)
     type(c_ptr), intent(in) :: handle
     integer(c_int), intent(out) :: status
@@ -222,7 +229,6 @@ contains
     status = NCI_BACKEND_UNAVAILABLE
     if (.not. ws%broken .and. owns_any(ws)) ws%broken = .true.
     if (ws%broken) then
-      ws%values(V_BROKEN) = 1
       call msg_set(msg, BROKEN_MESSAGE)
       return
     end if
@@ -232,10 +238,12 @@ contains
       call select_device(ws%device_num, selected)
       call restore_device(saved)
     end if
-    ws%magic = 0
     deallocate (ws, stat=ierr)
     if (ierr /= 0) then
-      call msg_set(msg, 'OpenACC context workspace deallocation failed')
+      ! Not deallocated: ws keeps its association (F2008 6.7.4).
+      ws%broken = .true.
+      call msg_set(msg, 'OpenACC context workspace deallocation failed; the context is ' // &
+                   'broken and kept until process teardown')
       return
     end if
     status = NCI_OK
@@ -245,10 +253,11 @@ contains
   ! Evaluation
   ! ------------------------------------------------------------------------
 
-  !> Start of every evaluation call on a live context: a broken context is
-  !> refused with its observation preserved; otherwise the observation is
-  !> reset (backend_status -1 until a backend evaluation finishes).
-  recursive subroutine acc_backend_begin(handle, status, msg)
+  !> Admission of an evaluation call before its other checks: a broken
+  !> context is refused (6) and any earlier plan is discarded. The
+  !> observation, the call ordinal and pending test controls are unchanged;
+  !> only acc_backend_evaluate starts a new observation.
+  recursive subroutine acc_backend_admit(handle, status, msg)
     type(c_ptr), intent(in) :: handle
     integer(c_int), intent(out) :: status
     type(message_t), intent(inout) :: msg
@@ -263,19 +272,17 @@ contains
     status = NCI_BACKEND_UNAVAILABLE
     if (.not. ws%broken .and. owns_any(ws)) ws%broken = .true.
     if (ws%broken) then
-      ws%values(V_BROKEN) = 1
       call msg_set(msg, BROKEN_MESSAGE)
       return
     end if
-    ws%call_ordinal = ws%call_ordinal + 1
-    call reset_observation(ws)
     ws%plan = workspace_plan()
     status = NCI_OK
-  end subroutine acc_backend_begin
+  end subroutine acc_backend_admit
 
   !> Checked plan of the nine host/device objects, before rho is touched.
   !> Bytes on each side: 8*Nin + 40*(B+Ny+Nz) + (37+72*D)*Nout. Overflow of
   !> any product or sum: status 1. An object above MAX_OBJECT_BYTES: 2.
+  !> Only a passed plan is kept, for this call; no observation changes.
   recursive subroutine acc_backend_plan(handle, lay, diagnostic, status, msg)
     type(c_ptr), intent(in) :: handle
     type(tile_layout), intent(in) :: lay
@@ -306,7 +313,6 @@ contains
     plan%nout = lay%nout
     plan%nf = FULL_FIELDS
     if (diagnostic) plan%nf = DIAGNOSTIC_FIELDS
-    ws%values(V_POINTS) = plan%nout
 
     overflow = .false.
     call checked_product(REAL_BYTES, plan%nin, plan%bytes(OBJ_RHO), overflow)
@@ -328,8 +334,6 @@ contains
       return
     end if
     plan%total = total
-    ws%values(V_PLANNED_HOST) = total
-    ws%values(V_PLANNED_DEVICE) = total
     do obj = 1, OBJECTS
       if (plan%bytes(obj) > MAX_OBJECT_BYTES) then
         status = NCI_UNSUPPORTED
@@ -392,12 +396,19 @@ contains
       call msg_set(msg, 'OpenACC evaluation without a fresh checked plan')
       return
     end if
-    ! Test controls are consumed by this backend evaluation.
+    ! Backend evaluation entry, after the common preflight and the checked
+    ! plan: a new call ordinal, a reset observation with the planned values,
+    ! and the pending test controls are consumed.
+    ws%plan%ready = .false.
+    ws%call_ordinal = ws%call_ordinal + 1
+    call reset_observation(ws)
+    ws%values(V_PLANNED_HOST) = ws%plan%total
+    ws%values(V_PLANNED_DEVICE) = ws%plan%total
+    ws%values(V_POINTS) = ws%plan%nout
     fail_at = ws%fail_at
     corruption = ws%corruption
     ws%fail_at = 0
     ws%corruption = 0
-    ws%plan%ready = .false.
 
     status = NCI_BACKEND_UNAVAILABLE
     if (acc_get_num_devices(acc_device_nvidia) < 1) then
@@ -494,15 +505,11 @@ contains
     call download_int32(ws%plan%nout, ws%host%marker)
     call record(ws, ACT_DOWNLOAD, OBJ_MARKER)
 
-    ! Test-only corruption of the downloaded first point, never of the kernel.
+    ! Test-only corruption of downloaded output point 1, never of the kernel.
     if (corruption == 1) then
       ws%host%marker(1) = 0
     else if (corruption == 2) then
-      if (ws%host%pstat(1) == PT_OK) then
-        ws%host%pstat(1) = STATUS_CLASSIFIED_INVALID
-      else
-        ws%host%pstat(1) = PT_OK
-      end if
+      ws%host%pstat(1) = CORRUPT_STATUS
     end if
 
     call validate(ws, counts, verified, first_bad, first_fail)
@@ -531,15 +538,11 @@ contains
       call finish(ws, status)
       return
     end if
-    call commit(ws, saved, diagnostic, rdg, srho, lam2, grad, hess, flags, ok)
-    if (.not. ok) then
-      ! The caller arrays were written; their staging could not be released.
-      call clear_result(counts, first_global, first_status, first_nrot)
-      call msg_set(msg, 'OpenACC output staging release failed after the caller arrays were ' // &
-                   'written; the context is broken; destroy it')
-      call finish(ws, status)
-      return
-    end if
+    call commit(ws, saved, diagnostic, rdg, srho, lam2, grad, hess, flags)
+    ! commit has returned, so its automatic deallocation has released both
+    ! call-local staging arrays: only now are they recorded as freed.
+    call record(ws, ACT_CALL_FREE, OBJ_FIELDS)
+    call record(ws, ACT_CALL_FREE, OBJ_FLAGS)
 
     if (counts(4) > 0) then
       status = NCI_NUMERIC_FAILURE
@@ -560,9 +563,11 @@ contains
 
   !> failure_at 0 disables, 1..18 fails that acquisition of the next backend
   !> evaluation through its ordinary failure branch; corruption 0 disables,
-  !> 1 changes the downloaded marker and 2 the downloaded status of the first
-  !> output point. Both are consumed by the next backend evaluation.
-  !> rc: 0 accepted, 1 invalid handle or value, 6 broken context.
+  !> 1 sets the downloaded marker of output point 1 to 0 and 2 its downloaded
+  !> status to INT32_MIN+1. A valid pair replaces the pending controls, which
+  !> the next backend evaluation consumes at its entry (after the common
+  !> preflight and the plan). rc: 0 accepted; 1 invalid handle, value out of
+  !> range or both nonzero, with nothing changed; 6 broken context.
   recursive subroutine acc_test_configure(handle, failure_at, corruption, rc)
     type(c_ptr), intent(in) :: handle
     integer(c_int32_t), intent(in) :: failure_at, corruption
@@ -578,14 +583,16 @@ contains
     end if
     if (failure_at < 0 .or. failure_at > ACC_ACQUISITIONS) return
     if (corruption < 0 .or. corruption > MAX_CORRUPTION) return
+    if (failure_at /= 0 .and. corruption /= 0) return
     ws%fail_at = failure_at
     ws%corruption = corruption
     rc = NCI_OK
   end subroutine acc_test_configure
 
-  !> Observation of the latest evaluation call (values and events: see
-  !> src/backend_openacc/README.md). rc: 0, or 1 for an invalid handle with
-  !> every output zero. Broken contexts can still be observed.
+  !> Observation of the latest backend evaluation, or the initial one
+  !> (values and events: see src/backend_openacc/README.md). rc: 0, or 1 for
+  !> an invalid handle with every output zero. Broken contexts can still be
+  !> observed.
   recursive subroutine acc_test_observe(handle, values, events, n_events, rc)
     type(c_ptr), intent(in) :: handle
     integer(c_int64_t), intent(out) :: values(ACC_OBSERVE_VALUES)
@@ -641,6 +648,9 @@ contains
     if (ws%magic /= WS_MAGIC) ws => null()
   end subroutine workspace_of
 
+  !> Observation of a new workspace and at each backend evaluation entry
+  !> (never broken there): schema 1, the call ordinal, first failure index -1
+  !> and every other value and event zero.
   recursive subroutine reset_observation(ws)
     type(acc_workspace), intent(inout) :: ws
     ws%values = 0
@@ -648,9 +658,7 @@ contains
     ws%event_total = 0
     ws%values(V_SCHEMA) = SCHEMA_VERSION
     ws%values(V_CALL) = ws%call_ordinal
-    ws%values(V_STATUS) = NOT_EVALUATED
     ws%values(V_FAIL_INDEX) = -1
-    ws%values(V_BROKEN) = merge(1_i64, 0_i64, ws%broken)
   end subroutine reset_observation
 
   !> Final values of a backend evaluation.
@@ -802,8 +810,11 @@ contains
   !> The single release path. For ids 9..1: unmap a live mapping and query
   !> its absence while the host array is still allocated, then free the
   !> device allocation. Then free the host arrays 9..1, keeping fields and
-  !> flags when keep_outputs. A contradicted absence query or a failed host
-  !> deallocation stops at once, keeps the rest and breaks the workspace.
+  !> flags when keep_outputs. A mapping or host array counts as released
+  !> only once its release is confirmed. A contradicted absence query or a
+  !> failed host deallocation stops at once and breaks the workspace, which
+  !> keeps that object (still mapped/allocated) and everything not yet
+  !> released.
   recursive subroutine release(ws, keep_outputs, ok)
     type(acc_workspace), intent(inout) :: ws
     logical, intent(in) :: keep_outputs
@@ -832,12 +843,12 @@ contains
         case (OBJ_MARKER)
           call acc_unmap_data(ws%host%marker)
         end select
-        ws%mapped(obj) = .false.
-        call record(ws, ACT_UNMAP, obj)
         if (host_present(ws, obj)) then
           ws%broken = .true.
           return
         end if
+        ws%mapped(obj) = .false.
+        call record(ws, ACT_UNMAP, obj)
       end if
       if (.not. (ws%device(obj) == c_null_devptr)) then
         call acc_free(ws%device(obj))
@@ -879,19 +890,22 @@ contains
   end subroutine release
 
   !> Moves the validated fields and flags to call-local staging (ownership
-  !> moves; it is not a free), restores the caller's device selection, writes
-  !> the caller arrays with explicit loops and releases the staging.
-  recursive subroutine commit(ws, saved, diagnostic, rdg, srho, lam2, grad, hess, flags, ok)
+  !> moves; it is not a free), restores the caller's device selection and
+  !> writes the caller arrays with explicit loops. The staging arrays are
+  !> unsaved local allocatables: Fortran deallocates them when this routine
+  !> returns, with no returning failure (a failure there is a fatal runtime
+  !> error at the worker boundary). A normal return therefore proves both
+  !> were released; the caller records their frees after it.
+  recursive subroutine commit(ws, saved, diagnostic, rdg, srho, lam2, grad, hess, flags)
     type(acc_workspace), intent(inout) :: ws
     type(device_state), intent(in) :: saved
     logical, intent(in) :: diagnostic
     real(dp), intent(inout) :: rdg(:), srho(:), lam2(:), grad(:, :), hess(:, :)
     integer(i8), intent(inout) :: flags(:)
-    logical, intent(out) :: ok
     real(dp), allocatable :: staged_fields(:, :)
     integer(i8), allocatable :: staged_flags(:)
     integer(i64) :: p, nout
-    integer :: k, ierr
+    integer :: k
 
     nout = ws%plan%nout
     call move_alloc(ws%host%fields, staged_fields)
@@ -915,20 +929,6 @@ contains
         end do
       end do
     end if
-    ok = .false.
-    deallocate (staged_fields, stat=ierr)
-    if (ierr /= 0) then
-      ws%broken = .true.
-      return
-    end if
-    call record(ws, ACT_CALL_FREE, OBJ_FIELDS)
-    deallocate (staged_flags, stat=ierr)
-    if (ierr /= 0) then
-      ws%broken = .true.
-      return
-    end if
-    call record(ws, ACT_CALL_FREE, OBJ_FLAGS)
-    ok = .true.
   end subroutine commit
 
   recursive function host_present(ws, obj) result(found)
@@ -1058,7 +1058,7 @@ contains
     ws%host%flags = FLAG_POISON
     ws%host%pstat = INT_POISON
     ws%host%nrot = INT_POISON
-    ws%host%marker = INT_POISON
+    ws%host%marker = MARKER_POISON
   end subroutine poison_staging
 
   recursive pure subroutine clear_result(counts, first_global, first_status, first_nrot)
