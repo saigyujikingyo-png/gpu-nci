@@ -18,13 +18,15 @@ import xml.etree.ElementTree as ET
 if __package__:
     from .support import fingerprint,json_new
     from .verify_threads import strict_json
-    from .expectations import COUNTS,expected_calls,expected_rejected_creates
+    from .expectations import (COUNTS,expected_calls,expected_rejected_creates,
+        expected_create_options,expected_rejected_options,expected_options_for_call)
     from .private import VALUE_NAMES,validate_ledger
 else:
     sys.path.insert(0,str(Path(__file__).resolve().parent))
     from support import fingerprint,json_new
     from verify_threads import strict_json
-    from expectations import COUNTS,expected_calls,expected_rejected_creates
+    from expectations import (COUNTS,expected_calls,expected_rejected_creates,
+        expected_create_options,expected_rejected_options,expected_options_for_call)
     from private import VALUE_NAMES,validate_ledger
 from reference.abi import Options,Tile
 
@@ -93,6 +95,9 @@ def group(directory,library,expected_evals,role,*,inventory=None,rejected_invent
     rejected_inventory=expected_rejected_creates(role) if rejected_inventory is None else rejected_inventory
     context_count=CONTEXT_COUNTS[role] if context_count is None else context_count
     kind_counts=KIND_COUNTS[role] if kind_counts is None else kind_counts
+    create_options=expected_create_options(role) if role in COUNTS else {
+        'context':{expected_options_for_call(name,spec) for name,spec in inventory.items()}}
+    rejected_options=expected_rejected_options(role) if role in COUNTS else {}
     assert expected_evals==len(inventory)
     receipt=fingerprint(library)
     metadata=strict_json((directory/'library.json').read_text(encoding='utf-8'))
@@ -135,10 +140,14 @@ def group(directory,library,expected_evals,role,*,inventory=None,rejected_invent
             rejected.add(name)
             assert record['status']==rejected_inventory[name] and record['context_token'] is None
             sizes({'options':40,'errbuf':16 if name.startswith('option/') else 128 if name=='cuda-unavailable' else 512})
+            assert blob('options')==rejected_options[name], 'rejected options differ from frozen input mutation'
         elif kind=='create':
             sizes({'options':40,'errbuf':512})
             assert record['status']==0
-            opts=Options.from_buffer_copy(blob('options'))
+            option_bytes=blob('options')
+            assert record['case_id'] in create_options
+            assert option_bytes in create_options[record['case_id']], 'create options differ from frozen context input'
+            opts=Options.from_buffer_copy(option_bytes)
             assert opts.abi_version==1 and opts.struct_bytes==40 and opts.reserved==0
             assert opts.output_mode in (0,1) and opts.backend in (0,1)
             assert integer(record['backend'],0,1)==opts.backend
@@ -147,6 +156,7 @@ def group(directory,library,expected_evals,role,*,inventory=None,rejected_invent
             assert cid==ordinal and cid not in context_ids and token not in live and len(live)<2
             context_ids.add(cid);creates+=1
             live[token]=dict(context_id=cid,mode=int(opts.output_mode),backend=int(opts.backend),
+                option_bytes=option_bytes,
                 eval_ordinal=0,evaluation_record_ordinal=None,backend_ordinal=0,
                 observation=initial_observation(),last_eval=None,pending=(0,0))
         else:
@@ -192,6 +202,7 @@ def group(directory,library,expected_evals,role,*,inventory=None,rejected_invent
             evaluated.add(name);spec=inventory[name]
             assert record['status']==spec['status']
             assert (state['mode'],state['backend'])==(spec['mode'],spec['backend'])
+            assert state['option_bytes']==expected_options_for_call(name,spec), 'case options differ from frozen scientific input'
             for key in ('shape','input_shape'):
                 assert type(record[key]) is list and len(record[key])==3
                 for dimension in record[key]:integer(dimension,1,17)
@@ -262,7 +273,8 @@ def verify(root,junit,library,bridge,cpu_library):
         names.append(item.attrib['classname'].split('.')[-1]+'.py::'+item.attrib['name'])
     assert len(names)==len(set(names))
     assert sorted(names)==cases['nodeids']
-    checked=[fingerprint(junit),fingerprint(HERE/'corpus.json'),fingerprint(HERE/'case_ids.json')]
+    checked=[fingerprint(junit),fingerprint(HERE/'corpus.json'),fingerprint(HERE/'case_ids.json'),
+             fingerprint(HERE/'expectations.py')]
     for name,path,count,role in [('public',library,corpus['public_shared_evaluations'],'production-shared-library'),
         ('private',bridge,corpus['private_bridge_evaluations'],'same-production-objects-test-only-bridge'),
         ('cpu-selector',cpu_library,0,'production-cpu-only')]:

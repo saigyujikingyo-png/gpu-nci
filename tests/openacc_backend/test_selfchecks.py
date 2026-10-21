@@ -3,6 +3,7 @@ import ctypes as ct
 import importlib.util
 import json
 import hashlib
+import struct
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -11,10 +12,11 @@ import pytest
 from .support import (guard_case,check_guards,byte_snapshot,assert_unchanged,Recorder,json_new,
                       fingerprint,assert_subtau_uncertain)
 from .private import VALUE_NAMES,array_sizes,validate_ledger
-from .test_rejections import mutated,MUTATIONS
+from .test_rejections import mutated,MUTATIONS,BAD_OPTIONS
 from .verify_threads import strict_json,parse
 from .verify_receipts import group,observation,initial_observation,KIND_COUNTS
-from .expectations import expected_calls,expected_rejected_creates
+from .expectations import (expected_calls,expected_rejected_creates,expected_create_options,
+                           expected_rejected_options,expected_options_for_call,options_blob)
 from reference.abi import Evaluation,options,Options,Tile,Stats
 from reference.fields import input_flags
 from reference.fields import quadratic,nci,pack_hessian
@@ -395,7 +397,7 @@ def invented_private_receipts(tmp_path,monkeypatch):
     recorder=Recorder(binary,tmp_path/'invented-private',role)
     recorder.hooks=InventedObserver()
     case=guard_case(Evaluation(np.ones((5,7,9))))
-    with recorder.context() as handle:
+    with recorder.context(case_id='corruption') as handle:
         assert recorder.run(handle,case,'invented-success')[0]==0
         # Automatic observer receipt is durable before run() returns.
         assert (recorder.directory/'0003.json').is_file()
@@ -455,6 +457,113 @@ def test_observer_is_retained_before_post_call_guard_failure(tmp_path,monkeypatc
     with recorder.context() as handle:
         with pytest.raises(AssertionError):recorder.run(handle,case,'invented-guard-failure')
         assert (recorder.directory/'0002.json').is_file() and (recorder.directory/'0003.json').is_file()
+
+
+def replace_option_bytes(recorder,ordinal,data):
+    file=recorder.directory/f'{ordinal:04d}.json';row=json.loads(file.read_text())
+    path=Path(row['artifacts']['options']['path']);path.write_bytes(data)
+    row['artifacts']['options']=fingerprint(path)
+    rewrite_json(file,row)
+
+
+@pytest.mark.parametrize('field,value',[
+    ('omp_threads',0),('omp_threads',17),('rho_min',float('nan')),('rho_min',0),
+    ('negative_tolerance',float('nan')),('negative_tolerance',-1),
+    ('negative_tolerance',-0.0),('rho_min',.2)])
+def test_complete_options_binding_rejects_rehashed_success_mutations(tmp_path,monkeypatch,field,value):
+    recorder,binary=invented_receipts(tmp_path,monkeypatch)
+    opts=options(backend=1);setattr(opts,field,value)
+    replace_option_bytes(recorder,1,bytes(opts))
+    with pytest.raises(AssertionError):check_invented(recorder,binary)
+
+
+def invented_low_zero_receipts(tmp_path,monkeypatch):
+    from . import support
+    monkeypatch.setattr(support,'Library',InventedSuccessLibrary)
+    binary=tmp_path/'not-an-options-native-library';binary.write_bytes(b'explicit low-zero receipt fixture')
+    recorder=Recorder(binary,tmp_path/'invented-low-zero','production-shared-library')
+    case=guard_case(Evaluation(np.ones((9,9,9))))
+    with recorder.context(options(backend=1,rho_min=.2),case_id='low-zero') as handle:
+        assert recorder.run(handle,case,'low-zero')[0]==0
+    json_new(recorder.directory/'end.json',dict(evaluations=1,live_contexts=0,
+        native_acceptance='requires external complete pytest/trace/receipt verification'))
+    return recorder,binary
+
+
+def check_low_zero(recorder,binary):
+    return group(recorder.directory,binary,1,'production-shared-library',
+        inventory={'low-zero':expected_calls('production-shared-library')['low-zero']},
+        rejected_inventory={},context_count=1,kind_counts={'create':1,'evaluate':1,'destroy':1})
+
+
+def test_low_zero_threshold_is_bound_to_independent_point2(tmp_path,monkeypatch):
+    recorder,binary=invented_low_zero_receipts(tmp_path,monkeypatch)
+    check_low_zero(recorder,binary)
+    replace_option_bytes(recorder,1,bytes(options(backend=1,rho_min=1e-8)))
+    with pytest.raises(AssertionError):check_low_zero(recorder,binary)
+
+
+REJECTED_OPTION_IDS=sorted(expected_rejected_creates('production-shared-library'))+['cpu-only-openacc-selector']
+
+
+def rejected_options_fixture(tmp_path,monkeypatch,case_id):
+    from . import support
+    monkeypatch.setattr(support,'Library',InventedLibrary)
+    role='production-cpu-only' if case_id=='cpu-only-openacc-selector' else 'production-shared-library'
+    status=expected_rejected_creates(role)[case_id]
+    if case_id.startswith('option/'):
+        opts=options(backend=1)
+        match=[(field,value) for field,value in BAD_OPTIONS if f'option/{field}/{value}'==case_id]
+        assert len(match)==1
+        setattr(opts,*match[0])
+    else:opts=options(backend=2 if case_id=='cuda-unavailable' else 1)
+    # The source test's ctypes input is compared to separately packed expected bits.
+    assert bytes(opts)==expected_rejected_options(role)[case_id]
+    binary=tmp_path/'not-a-rejected-native-library';binary.write_bytes(b'rejected-input byte fixture only')
+    recorder=Recorder(binary,tmp_path/'invented-rejected',role)
+    errbytes=16 if case_id.startswith('option/') else 128 if case_id=='cuda-unavailable' else 512
+    recorder.retain('create-rejected',case_id,status,'',dict(options=bytes(opts),errbuf=b'\0'*errbytes),context_token=None)
+    return recorder,binary,role,status
+
+
+def check_rejected_options(recorder,binary,role,case_id,status):
+    return group(recorder.directory,binary,0,role,inventory={},
+        rejected_inventory={case_id:status},context_count=0,kind_counts={'create-rejected':1})
+
+
+@pytest.mark.parametrize('case_id',REJECTED_OPTION_IDS)
+def test_rejected_options_bind_exact_predefined_mutation(tmp_path,monkeypatch,case_id):
+    recorder,binary,role,status=rejected_options_fixture(tmp_path,monkeypatch,case_id)
+    check_rejected_options(recorder,binary,role,case_id,status)
+    old=Path(json.loads((recorder.directory/'0001.json').read_text())['artifacts']['options']['path']).read_bytes()
+    changed=bytes([old[0]^1])+old[1:]
+    replace_option_bytes(recorder,1,changed)
+    with pytest.raises(AssertionError):check_rejected_options(recorder,binary,role,case_id,status)
+
+
+@pytest.mark.parametrize('case_id,offset',[('option/rho_min/nan',24),('option/negative_tolerance/nan',32)])
+def test_rejected_options_require_nan_payload_bits(tmp_path,monkeypatch,case_id,offset):
+    recorder,binary,role,status=rejected_options_fixture(tmp_path,monkeypatch,case_id)
+    path=Path(json.loads((recorder.directory/'0001.json').read_text())['artifacts']['options']['path'])
+    changed=bytearray(path.read_bytes());changed[offset:offset+8]=struct.pack('<Q',0x7ff8000000000001)
+    replace_option_bytes(recorder,1,bytes(changed))
+    with pytest.raises(AssertionError):check_rejected_options(recorder,binary,role,case_id,status)
+
+
+def test_independent_full_options_inventory_covers_all_contexts_and_evaluations():
+    for role in ('production-shared-library','same-production-objects-test-only-bridge'):
+        table=expected_create_options(role)
+        for case_id,spec in expected_calls(role).items():
+            blob=expected_options_for_call(case_id,spec)
+            assert len(blob)==40 and any(blob in choices for choices in table.values())
+            opts=Options.from_buffer_copy(blob)
+            assert opts.omp_threads==1 and opts.reserved==0
+            assert opts.abi_version==1 and opts.struct_bytes==40
+            assert np.isfinite(opts.rho_min) and opts.rho_min>0
+            assert np.isfinite(opts.negative_tolerance) and opts.negative_tolerance>=0
+    assert options_blob()==bytes(options(backend=1))
+    assert expected_options_for_call('low-zero',{'mode':1,'backend':1})==bytes(options(backend=1,rho_min=.2))
+    assert expected_options_for_call('subnormal-gradient',{'mode':1,'backend':1})[24:32]==struct.pack('<Q',1)
 
 
 def test_frozen_corpus_arithmetic_and_case_ids():

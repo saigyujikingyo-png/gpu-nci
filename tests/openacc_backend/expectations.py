@@ -3,6 +3,7 @@
 No candidate output or receipt is read to construct this inventory.
 """
 from itertools import product
+import struct
 
 COUNTS={'production-shared-library':295,'same-production-objects-test-only-bridge':55,
         'production-cpu-only':0}
@@ -108,3 +109,81 @@ def expected_rejected_creates(role):
         ('rho_min',float('nan')),('rho_min',float('inf')),('negative_tolerance',-1),
         ('negative_tolerance',float('nan'))]
     return {**{f'option/{field}/{value}':1 for field,value in values},'cuda-unavailable':6}
+
+
+def options_blob(**updates):
+    """Independent little-endian ABI-v1 bytes, including exact FP64 payloads.
+
+    QNAN is an explicit input bit pattern, not an is-NaN equivalence class.
+    The finite package targets the frozen Linux x86-64 ABI.
+    """
+    fields=dict(abi_version=1,struct_bytes=40,backend=1,output_mode=1,
+                omp_threads=1,reserved=0,rho_min=1e-8,negative_tolerance=0.)
+    assert set(updates)<=set(fields)
+    fields.update(updates)
+    result=struct.pack('<6i',*(fields[name] for name in ('abi_version','struct_bytes',
+        'backend','output_mode','omp_threads','reserved')))
+    for name in ('rho_min','negative_tolerance'):
+        value=fields[name]
+        result+=struct.pack('<Q',0x7ff8000000000000) if value=='QNAN' else struct.pack('<d',value)
+    assert len(result)==40
+    return result
+
+
+def expected_options_for_call(case_id,spec):
+    """Thresholds are fixed by case purpose, never inferred from a receipt."""
+    updates=dict(backend=spec['backend'],output_mode=spec['mode'])
+    if case_id in ('overflow','numeric-failure','huge-device-failure'):
+        updates['rho_min']=1e-260
+    elif case_id=='low-zero':updates['rho_min']=.2
+    elif case_id in ('subnormal-constant','subnormal-gradient'):
+        updates['rho_min']=struct.unpack('<d',struct.pack('<Q',1))[0]
+    if case_id in ('negative-center','negative-corner') or case_id.startswith('seam/'):
+        updates['negative_tolerance']=1e-10
+    elif case_id in ('at-negative-tolerance','just-below-negative-tolerance','negative-zero'):
+        updates['negative_tolerance']=1e-6
+    return options_blob(**updates)
+
+
+def expected_create_options(role):
+    """Allowed full option blobs for each independent source context label.
+
+    A repeated label such as mode/storage may allow FULL or DIAGNOSTIC. Each
+    later evaluation is additionally bound to its single exact expected blob.
+    """
+    result={}
+    for name,spec in expected_calls(role).items():
+        if role=='production-shared-library':
+            if name.startswith('matrix/'):context='/'.join(name.split('/')[:3])
+            elif name.startswith('nx5/'):context='nx5'
+            elif name.startswith('seam/'):context='negative-seam'
+            elif name in ('A-first','B-first','B-after-A-free-new-input'):
+                context='A' if name=='A-first' else 'B'
+            elif name.startswith('huge-X/'):context='huge-X'
+            elif name.startswith('reject/'):context=name.split('/')[1]
+            elif name.startswith(('null/','alias/','extreme/','mode/')):context=name.split('/')[0]
+            else:context=name
+        else:
+            if name.startswith('finite-recovery-'):context='fail-'+name.removeprefix('finite-recovery-')
+            elif name.startswith('corruption-'):context='corruption'
+            elif name.startswith('control/'):context='control-preflight'
+            elif name.startswith('storage/'):context='no-retained-capacity'
+            elif name.startswith('isolation/'):
+                context='isolated-'+name.split('/')[1][0]
+            else:context=name
+        result.setdefault(context,set()).add(expected_options_for_call(name,spec))
+    if role=='same-production-objects-test-only-bridge':
+        result['cpu-no-device']={options_blob(backend=0)}
+    return result
+
+
+def expected_rejected_options(role):
+    result={}
+    for case_id in expected_rejected_creates(role):
+        if case_id=='cuda-unavailable':result[case_id]=options_blob(backend=2)
+        elif case_id=='cpu-only-openacc-selector':result[case_id]=options_blob()
+        else:
+            _,field,text=case_id.split('/')
+            value='QNAN' if text=='nan' else float('inf') if text=='inf' else int(text)
+            result[case_id]=options_blob(**{field:value})
+    return result

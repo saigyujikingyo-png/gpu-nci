@@ -13,6 +13,11 @@ mode and actual backing-array shape. Receipt totals are pinned independently:
 524 public records, 260 private records (including 29 configure and 118 observe
 calls), and one CPU-only selector record. These are not accepted from self-reported
 end markers. Automatic private observation adds no field evaluations.
+Successful and rejected create inputs are bound to independent full 40-byte
+options: every integer, exact FP64 threshold/tolerance and prescribed rejection
+mutation (including NaN payload bits). Context labels select independently
+allowed blobs; every evaluation is then bound to its single exact case blob.
+No expected option value is inferred from a candidate receipt.
 The complete successful run has 278 GPU field regions: public 238, bridge 34,
 pthread six. One additional optional-library CPU-selector evaluation is a CPU
 reference check. Preflight rejection and allocation injection add no field
