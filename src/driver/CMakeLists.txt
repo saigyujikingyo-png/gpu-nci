@@ -78,7 +78,10 @@ function(nci_add_worker target backend)
     set_target_properties(${target} PROPERTIES
       BUILD_RPATH "$<TARGET_FILE_DIR:${backend}>;${_runtime_dirs}"
       BUILD_RPATH_USE_ORIGIN FALSE)
-    target_link_options(${target} PRIVATE "LINKER:--disable-new-dtags")
+    # Link the GPU OpenACC runtime directly before NVHPC's host-only API stubs.
+    # Keep the backend's frozen architecture/toolkit explicit at this link too.
+    target_link_options(${target} PRIVATE -acc=gpu -gpu=cc120,cuda13.3
+      "LINKER:--disable-new-dtags")
   endif()
 endfunction()
 
