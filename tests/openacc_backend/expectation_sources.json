@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "scope": "unchanged independent mathematical expectations; no candidate output",
+  "sources": [
+    {
+      "path": "reference/fields.py",
+      "sha256": "d3953c94a481a5be2333084fa637d82abd3861e0c0eb46b4a92be239f0617967",
+      "bytes": 6309
+    },
+    {
+      "path": "reference/extreme.py",
+      "sha256": "49f68a3e9203837e5a32ea0fbded6256d63a48131d3bc965b8ff3bb7eda95d4e",
+      "bytes": 2680
+    },
+    {
+      "path": "tests/oracle/slab_cases.py",
+      "sha256": "ba16bf824cc038fb13659095d6930e5d2f24dde7264860549c7f97c140d49cfc",
+      "bytes": 4788
+    },
+    {
+      "path": "tests/oracle/test_library_fields.py",
+      "sha256": "43a6fd8346c8dbd74d8c4210abd1f9b43c6f91a3c09a8c789adeaa5adb94b037",
+      "bytes": 17189
+    }
+  ]
+}

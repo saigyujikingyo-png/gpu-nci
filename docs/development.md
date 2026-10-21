@@ -14,15 +14,17 @@ See [acceptance status](status.md) for the actual test boundary.
 M3A's isolated evaluator now passes its frozen 54-record synthetic corpus on
 the RTX 5070 Laptop GPU; [results and limits](openacc-probe-results.md) identify
 the exact tested revisions. M3B0's standalone resource gate also passed its
-[finite device checks](openacc-resource-results.md). The next M3 work is public-backend integration:
-checked allocation/cleanup, per-context resources, tile/slab mapping and
-synchronous output commit under the existing ABI. These remain unimplemented.
+[finite device checks](openacc-resource-results.md). M3B1 public-backend integration
+now passes [independently accepted finite synthetic checks](openacc-public-results.md)
+for allocation/cleanup, per-context resources, tile/slab mapping and synchronous
+output commit under the unchanged ABI. The [public-library contract](openacc-public-contract.md)
+defines the accepted scope. The [historical preparation report](openacc-public-preparation.md)
+preserves the earlier build and single-case diagnostic evidence.
 No scientific or performance package was executed during M3A development.
 
-M3B's finite [resource gate](openacc-resource-contract.md) is accepted; work next
-proceeds to context/field dispatch and CLI/slab integration as set out in the
-[backend plan](openacc-backend-plan.md). The resource gate alone does not
-implement the public GPU backend or establish scientific/performance acceptance.
+Work next proceeds to M3B2 CLI/slab integration as set out in the
+[backend plan](openacc-backend-plan.md). Library synthetic acceptance does not
+establish CLI, real-density scientific or performance acceptance.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and
@@ -30,8 +32,8 @@ implement the public GPU backend or establish scientific/performance acceptance.
 3. M2: OpenMP scaling and full-grid/slab equivalence.
 4. M3: OpenACC with explicit actual-device evidence and no CPU fallback, beginning
    with the isolated [M3A numerical portability probe](openacc-probe-contract.md).
-5. M4: finite scientific validation/benchmark package managed by a GPT-6.1 Sol
-   execution subagent under the user's standing authorization.
+5. M4: finite scientific validation/benchmark packages prepared and executed
+   by a GPT-6.1 Sol subagent, with independent review and receipt acceptance.
 6. Optional CUDA C ABI path only after profiling justifies it.
 
 CPU implementation and independent tests are developed in separate branches.
@@ -59,11 +61,17 @@ Sources:
 - https://docs.nvidia.com/cuda/wsl-user-guide/index.html
 
 Scientific solver runs and performance benchmarks remain separate from these
-synthetic development tests. On 2026-10-21 the user authorized their automatic
-execution for this project: first freeze input provenance, finite stages,
-resource/time limits, logs and stopping conditions, then assign execution to a
-GPT-6.1 Sol subagent. This supersedes the earlier manual-launch requirement;
-it does not change scientific specifications or acceptance thresholds.
+synthetic development tests. On 2026-10-21 the user authorized automatic GPU-NCI
+calculation scheduling and execution through GPT-6.1 Sol subagents, replacing
+the earlier manual-launch requirement. Before each run, independently review
+and freeze provenance, finite stages, resource/time limits, logs and stop
+controls. The launcher must work independently of an active agent session.
+The Sol execution manager checks capacity, launches and monitors the package;
+root or an independent reviewer accepts actual receipts. Further packages in
+the existing roadmap require their own review/readiness gates. Do not replay
+a consumed attempt or expand a live package. The permanent execution rules
+are in [AGENTS.md](../AGENTS.md); scientific specifications and acceptance
+thresholds remain unchanged.
 Preparation, build, synthetic validation, scientific acceptance and performance
 reporting remain separate states.
 

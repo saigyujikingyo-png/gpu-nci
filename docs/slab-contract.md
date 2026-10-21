@@ -125,6 +125,7 @@ output files and receipts for both modes and slab sizes, exercise whole-input
 preflight before first output, and verify memory-budget boundary arithmetic.
 Keep the original declared FP64 tolerance gates; no tuning after failed runs.
 
-Only small synthetic tests are agent-run. Real-density studies and performance
-measurements remain separately frozen user-launched packages. GPU execution,
-OpenMP speedup and scientific acceptance are not implied by CPU slab equivalence.
+Real-density studies and performance measurements require separately reviewed
+and frozen packages, executed by GPT-6.1 Sol under [AGENTS.md](../AGENTS.md).
+GPU execution, OpenMP speedup and scientific acceptance are not implied by CPU
+slab equivalence.

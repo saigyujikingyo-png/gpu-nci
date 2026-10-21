@@ -3,6 +3,8 @@ project(gpu_nci VERSION 0.1.0 LANGUAGES C Fortran)
 include(CTest)
 option(NCI_ENABLE_OPENMP "Enable CPU OpenMP" ON)
 option(NCI_BUILD_TEST_HOOKS "Build separate test-only numerical hooks" OFF)
+option(NCI_ENABLE_OPENACC "Also build the optional nci_openacc library (NVHPC 26.9, Linux x86_64, cc120 only)" OFF)
+option(NCI_BUILD_OPENACC_TESTS "Build optional OpenACC validation binaries without running them" OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/modules")
 if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
@@ -21,6 +23,7 @@ add_executable(nci_abi_layout tests/abi/layout.c)
 target_link_libraries(nci_abi_layout PRIVATE nci_contract)
 add_test(NAME abi_c_layout COMMAND nci_abi_layout)
 set(NCI_CPU_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/backend_cpu" CACHE PATH "CPU source directory; external worktrees may be tested without merging")
+set(NCI_OPENACC_SOURCE_DIR "${NCI_CPU_SOURCE_DIR}/../backend_openacc" CACHE PATH "OpenACC backend directory; by default beside the CPU sources of the same checkout")
 set(NCI_IO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/io" CACHE PATH "Input source directory")
 set(NCI_ORACLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Independent oracle checkout")
 set(NCI_DRIVER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/driver" CACHE PATH "Native CLI worker source directory")
@@ -32,6 +35,17 @@ set(NCI_OPENACC_RESOURCE_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_res
 set(NCI_BUILD_REVISION "UNKNOWN" CACHE STRING "Explicit source revision declaration; UNKNOWN unless supplied by builder")
 if(EXISTS "${NCI_CPU_SOURCE_DIR}/CMakeLists.txt")
   add_subdirectory("${NCI_CPU_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/cpu")
+endif()
+# Separate library with the same three exports, CPU and OpenACC selectors;
+# nci_cpu and the CPU driver are unchanged by this option.
+if(NCI_ENABLE_OPENACC)
+  add_subdirectory("${NCI_OPENACC_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/openacc")
+endif()
+if(NCI_BUILD_OPENACC_TESTS)
+  if(NOT BUILD_TESTING OR NOT NCI_ENABLE_OPENACC)
+    message(FATAL_ERROR "NCI_BUILD_OPENACC_TESTS requires BUILD_TESTING and NCI_ENABLE_OPENACC")
+  endif()
+  add_subdirectory(tests/openacc_backend "${CMAKE_CURRENT_BINARY_DIR}/openacc_backend_tests")
 endif()
 if(EXISTS "${NCI_IO_SOURCE_DIR}/CMakeLists.txt")
   add_subdirectory("${NCI_IO_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/io")
@@ -74,4 +88,18 @@ if(BUILD_TESTING AND EXISTS "${NCI_OPENACC_RESOURCE_TEST_DIR}/test_verify.py")
   add_test(NAME openacc_resource_verifier_selfchecks
     COMMAND "${Python3_EXECUTABLE}" -m pytest -q -ra "${NCI_OPENACC_RESOURCE_TEST_DIR}")
   set_tests_properties(openacc_resource_verifier_selfchecks PROPERTIES TIMEOUT 120)
+endif()
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME openacc_backend_verifier_selfchecks
+    COMMAND "${CMAKE_COMMAND}" -E env "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+      "${Python3_EXECUTABLE}" -m pytest -q -ra -p no:cacheprovider
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_backend/test_selfchecks.py")
+  set_tests_properties(openacc_backend_verifier_selfchecks PROPERTIES TIMEOUT 120)
+  add_test(NAME openacc_backend_trace_selfchecks
+    COMMAND "${CMAKE_COMMAND}" -E env "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+      "${Python3_EXECUTABLE}" -m pytest -q -ra -p no:cacheprovider
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_backend_trace/test_pure.py"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_backend_trace/test_policy_v2.py")
+  set_tests_properties(openacc_backend_trace_selfchecks PROPERTIES TIMEOUT 120)
 endif()

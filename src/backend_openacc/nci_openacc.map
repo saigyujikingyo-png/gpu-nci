@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: MIT */
+/* Export exactly the three ABI v1 entry points of libnci_openacc. The node is
+ * named because the NVHPC OpenACC link adds its own named version node
+ * (compilers/lib/nvhpcloc.ld); an anonymous node cannot be combined with it. */
+NCI_ABI_V1 {
+  global:
+    nci_context_create_v1;
+    nci_eval_tile_f64_v1;
+    nci_context_destroy_v1;
+  local:
+    *;
+};

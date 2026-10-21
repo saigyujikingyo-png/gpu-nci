@@ -12,10 +12,13 @@ The isolated M3A [OpenACC portability probe passed](docs/openacc-probe-results.m
 54 fixed synthetic records on an RTX 5070 Laptop GPU. The subsequent standalone
 [M3B0 resource gate passed](docs/openacc-resource-results.md) its frozen
 allocation, cleanup and two-instance transport checks on the same GPU model.
-Public GPU dispatch remains unimplemented.
+The optional public OpenACC library passed independently reviewed
+[M3B1 finite synthetic validation](docs/openacc-public-results.md), including
+actual GPU execution, rejection atomicity, cleanup and host-thread migration.
+GPU selection through the offline CLI is the next M3B2 step.
 OpenMP scaling measurements remain unrun.
 See [current status](docs/status.md).
-**No GPU NCI backend, scientific reproduction, or speedup is claimed.**
+**Real-density scientific validation and speedup measurements remain unrun.**
 
 ## Build
 
