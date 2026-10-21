@@ -1,6 +1,8 @@
 # M3B1: optional public OpenACC backend contract
 
-Status: DESIGN REVIEWED; implementation and native acceptance pending.
+Status: DESIGN REVIEWED; implementation compiled, native acceptance pending.
+See the [preparation report](openacc-public-preparation.md) for the exact
+compiled revision and outstanding diagnostic/acceptance work.
 This adds a library execution path, not a new scientific method. The numerical
 specification, finite-difference stencil, Jacobi limit, uncertainty meanings,
 units, flags and CPU reference remain unchanged. CLI/worker selection is M3B2;
