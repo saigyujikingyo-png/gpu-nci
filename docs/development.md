@@ -61,14 +61,15 @@ Sources:
 - https://docs.nvidia.com/cuda/wsl-user-guide/index.html
 
 Scientific solver runs and performance benchmarks remain separate from these
-synthetic development tests. The latest user-supplied execution instruction
-restores manual launch, superseding earlier automatic-execution permission.
-Agents prepare and review frozen input provenance, finite stages, resource/time
-limits, logs and stop controls, with necessary light syntax/hash/empty-control
-checks. The user closes resource-consuming applications and launches the
-standalone package. A GPT-6.1 Sol subagent prepares it and later checks actual
-receipts; no automatic next package follows acceptance. Scientific specifications
-and acceptance thresholds remain unchanged.
+synthetic development tests. During the current authoring stage, agents prepare
+and review input provenance, finite stages, resource/time limits, logs and stop
+controls, with compile/static/input/hash/empty-control checks only. Native
+execution is held while the scope of the supplied manual-launch instructions
+is clarified against the earlier GPU-NCI-specific authorization. The launcher
+must work independently of an active agent session. A GPT-6.1 Sol subagent
+prepares it and later checks actual receipts; acceptance does not automatically
+start another package. Scientific specifications and acceptance thresholds
+remain unchanged.
 Preparation, build, synthetic validation, scientific acceptance and performance
 reporting remain separate states.
 
