@@ -20,7 +20,10 @@ synthetic validation for explicit GPU selection, full-grid/X-slab output and
 checked host/device reservations, with no CPU fallback.
 OpenMP scaling measurements remain unrun.
 See [current status](docs/status.md).
-**Real-density scientific validation and speedup measurements remain unrun.**
+The first [stored-water real-density case](docs/water-validation.md) has
+conditional scientific acceptance, with independently accepted GPU traces and
+cleanup. **Performance (P1) remains NOT_RUN; no speedup is measured.**
+See the five-minute [research handoff](RESEARCH_HANDOFF.md) for scope and limits.
 
 ## Build
 
