@@ -9,6 +9,10 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/build-string.cmake")
 
 function(nci_add_worker target backend)
+  set(_benchmark FALSE)
+  if(ARGC GREATER 2 AND ARGV2 STREQUAL "BENCHMARK")
+    set(_benchmark TRUE)
+  endif()
   if(backend STREQUAL "nci_cpu")
     set(_has_openacc .false.)
     set(_backends "[\"cpu\"]")
@@ -36,27 +40,50 @@ function(nci_add_worker target backend)
 
   # Resolve TARGET_FILE first, then byte-encode it at build time. Never inject
   # a backend path as a Fortran literal, including quotes or control bytes.
-  file(GENERATE OUTPUT "${_generated}/backend-path.txt" CONTENT "$<TARGET_FILE:${backend}>")
-  add_custom_command(OUTPUT "${_generated}/nci_driver_backend.f90"
+  if(_benchmark)
+    # Private object linkage has no used backend DSO to identify. Do not emit
+    # the production library path as though it were a runtime dependency.
+    set(_nci_metadata "module nci_driver_backend\nimplicit none\ncontains\n")
+    nci_build_string(build_backend_library "private-object-link:${backend}_bench_objects")
+    string(APPEND _nci_metadata "end module\n")
+    file(GENERATE OUTPUT "${_generated}/nci_driver_backend.f90" CONTENT "${_nci_metadata}")
+  else()
+    file(GENERATE OUTPUT "${_generated}/backend-path.txt" CONTENT "$<TARGET_FILE:${backend}>")
+    add_custom_command(OUTPUT "${_generated}/nci_driver_backend.f90"
     COMMAND "${CMAKE_COMMAND}"
       "-DINPUT_FILE=${_generated}/backend-path.txt"
       "-DOUTPUT_FILE=${_generated}/nci_driver_backend.f90"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/backend-metadata.cmake"
     DEPENDS "${_generated}/backend-path.txt"
       "${CMAKE_CURRENT_SOURCE_DIR}/backend-metadata.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/build-string.cmake"
-    VERBATIM)
-  add_executable(${target} "${_generated}/nci_driver_build.f90"
-    "${_generated}/nci_driver_backend.f90" nci_driver.f90)
-  set_target_properties(${target} PROPERTIES Fortran_MODULE_DIRECTORY "${_modules}")
+      VERBATIM)
+  endif()
+  if(_benchmark)
+    set(_benchmark_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../benchmarks")
+    add_executable(${target} "${_generated}/nci_driver_build.f90"
+      "${_generated}/nci_driver_backend.f90" nci_driver_support.f90
+      "${_benchmark_dir}/nci_benchmark_support.f90" "${_benchmark_dir}/nci_benchmark.f90"
+      "${_benchmark_dir}/nci_benchmark_io.c")
+    target_link_libraries(${target} PRIVATE ${backend}_bench_objects nci_cube_input)
+    target_compile_definitions(${target} PRIVATE NCI_BENCHMARK)
+  else()
+    add_executable(${target} "${_generated}/nci_driver_build.f90"
+      "${_generated}/nci_driver_backend.f90" nci_driver_support.f90 nci_driver.f90)
+    target_link_libraries(${target} PRIVATE ${backend} nci_cube_input)
+  endif()
+  set_target_properties(${target} PROPERTIES Fortran_MODULE_DIRECTORY "${_modules}" Fortran_PREPROCESS ON)
   target_include_directories(${target} PRIVATE "${_modules}")
-  # Link exactly one public ABI library. nci_cube_input is built by the same
-  # project compiler and contributes only the strict input reader.
-  target_link_libraries(${target} PRIVATE ${backend} nci_cube_input)
-  add_dependencies(${target} ${backend}_objects nci_cube_input)
+  # Production uses one public ABI library; private benchmarks use dedicated
+  # instrumented objects. nci_cube_input is the same-compiler strict reader.
+  if(_benchmark)
+    add_dependencies(${target} ${backend}_bench_objects nci_cube_input)
+  else()
+    add_dependencies(${target} ${backend}_objects nci_cube_input)
+  endif()
   if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(${target} PRIVATE -ffp-contract=off -fimplicit-none)
+    target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:-ffp-contract=off;-fimplicit-none>")
   elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
-    target_compile_options(${target} PRIVATE -Kieee -Mnofma -Mrecursive -Mreentrant)
+    target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:-Kieee;-Mnofma;-Mrecursive;-Mreentrant>")
   endif()
 
   if(backend STREQUAL "nci_openacc")
@@ -89,10 +116,20 @@ nci_add_worker(nci_driver nci_cpu)
 if(NCI_ENABLE_OPENACC)
   nci_add_worker(nci_driver_openacc nci_openacc)
 endif()
+if(NCI_BUILD_BENCHMARKS)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT NCI_ENABLE_OPENMP)
+    message(FATAL_ERROR "Private benchmarks require Linux durable file/directory fsync and OpenMP")
+  endif()
+  nci_add_worker(nci_benchmark_cpu nci_cpu BENCHMARK)
+  if(NCI_ENABLE_OPENACC)
+    nci_add_worker(nci_benchmark_openacc nci_openacc BENCHMARK)
+  endif()
+endif()
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME native_driver_protocol COMMAND "${CMAKE_COMMAND}" -E env
     "NCI_DRIVER=$<TARGET_FILE:nci_driver>" "${Python3_EXECUTABLE}" -m pytest -q -ra
     "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/driver")
   set_tests_properties(native_driver_protocol PROPERTIES TIMEOUT 120)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../tests/benchmark" "${CMAKE_CURRENT_BINARY_DIR}/benchmark_tests")
 endif()

@@ -29,6 +29,11 @@ set(NCI_CPU_SOURCES
   nci_kernel.f90
   "${_nci_acc_stub}"
   nci_capi.f90)
+# Only these three carry NCI_BENCHMARK conditionals (private P1 timing objects
+# below), so they are always preprocessed. Without the definition, as in every
+# target except nci_cpu_bench_objects, they compile exactly the original code.
+set_source_files_properties(nci_kernel.f90 nci_capi.f90 "${_nci_acc_stub}"
+  PROPERTIES Fortran_PREPROCESS ON)
 
 # Object library shared by the production shared library and white-box tests.
 # Its modules have their own directory, propagated to consumers as an include
@@ -65,6 +70,44 @@ if(UNIX AND NOT APPLE)
   set(_nci_map "${CMAKE_CURRENT_SOURCE_DIR}/nci_cpu.map")
   target_link_options(nci_cpu PRIVATE "LINKER:--version-script=${_nci_map}" "LINKER:--no-undefined")
   set_property(TARGET nci_cpu APPEND PROPERTY LINK_DEPENDS "${_nci_map}")
+endif()
+
+# Private P1 benchmark objects (NCI_BUILD_BENCHMARKS, declared OFF by the root
+# build; src/benchmark/core/README.md). The production sources are compiled a
+# second time with NCI_BENCHMARK into their own module directory, with the
+# timing record and clock of src/benchmark/core. nci_cpu, its tests and the
+# worker never use them. A benchmark executable links exactly this object
+# target and the reader built by the same compiler, never nci_cpu as well; the
+# definition, module path, strict Fortran options and OpenMP propagate to it.
+if(NCI_BUILD_BENCHMARKS)
+  if(NOT NCI_ENABLE_OPENMP)
+    message(FATAL_ERROR "NCI_BUILD_BENCHMARKS requires NCI_ENABLE_OPENMP: the CPU timing observes the actual field team")
+  endif()
+  set(_nci_bench_core "${CMAKE_CURRENT_SOURCE_DIR}/../benchmark/core")
+  add_library(nci_cpu_bench_objects OBJECT
+    "${_nci_bench_core}/nci_bench_clock.c"
+    "${_nci_bench_core}/nci_bench_types.f90"
+    ${NCI_CPU_SOURCES})
+  set(_nci_cpu_bench_moddir "${CMAKE_CURRENT_BINARY_DIR}/bench_modules")
+  set_target_properties(nci_cpu_bench_objects PROPERTIES Fortran_MODULE_DIRECTORY "${_nci_cpu_bench_moddir}")
+  target_include_directories(nci_cpu_bench_objects PUBLIC "$<BUILD_INTERFACE:${_nci_cpu_bench_moddir}>")
+  target_compile_definitions(nci_cpu_bench_objects PUBLIC NCI_BENCHMARK)
+  # Fortran only (the C clock helper keeps the C flags): the production object
+  # options, and the floating-point ones for Fortran consumers.
+  if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    set(_nci_cpu_bench_private -ffp-contract=off -frecursive)
+    set(_nci_cpu_bench_interface -ffp-contract=off)
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+    set(_nci_cpu_bench_private -Kieee -Mnofma -Mrecursive -Mreentrant)
+    set(_nci_cpu_bench_interface -Kieee -Mnofma)
+  else()
+    set(_nci_cpu_bench_private "")
+    set(_nci_cpu_bench_interface "")
+  endif()
+  target_compile_options(nci_cpu_bench_objects
+    PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:${_nci_cpu_bench_private}>"
+    INTERFACE "$<$<COMPILE_LANGUAGE:Fortran>:${_nci_cpu_bench_interface}>")
+  target_link_libraries(nci_cpu_bench_objects PUBLIC OpenMP::OpenMP_Fortran)
 endif()
 
 if(BUILD_TESTING)
