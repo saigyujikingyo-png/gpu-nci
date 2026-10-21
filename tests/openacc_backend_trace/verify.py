@@ -144,9 +144,11 @@ def buffers(row):
 
 
 def policy_check(policy, checked):
-    keys(policy, ('schema_version', 'state', 'evidence', 'plan', 'group_order', 'sites',
-                  'explicit', 'metadata', 'process_notices', 'review'), 'policy')
-    need(type(policy['schema_version']) is int and policy['schema_version'] == 1, 'policy schema')
+    version = policy.get('schema_version') if type(policy) is dict else None
+    need(type(version) is int and version in (1, 2), 'policy schema')
+    outer = ('schema_version', 'state', 'evidence', 'plan', 'group_order', 'sites',
+             'explicit', 'metadata', 'process_notices', 'review')
+    keys(policy, outer + (('static_prefix', 'runtime') if version == 2 else ()), 'policy')
     need(policy['state'] in ('PREPARED', 'FROZEN'), 'policy state')
     prepared = policy['state'] != 'FROZEN'
     evidence = policy['evidence']
@@ -162,13 +164,26 @@ def policy_check(policy, checked):
     plan = parse_json(read(plan_path)); plan_rows(plan, prepared)
     sites = policy['sites']
     need(type(sites) is dict and sites, 'explicit runtime sites required')
+    statics = static_sites(policy) if version == 2 else set()
+    if version == 2:
+        keys(policy['runtime'], ('native_wrapper', 'libraries'), 'runtime proof')
+        receipt(policy['runtime']['native_wrapper'], checked)
+        keys(policy['runtime']['libraries'], ('host', 'device', 'notify'), 'runtime libraries')
+        for item in policy['runtime']['libraries'].values():
+            receipt(item, checked)
     for name, site in sites.items():
         need(type(name) is str and name, 'site name')
         keys(site, ('kind', 'fields', 'proof'), 'site')
         need(site['kind'] in NOTICE_KINDS, 'site kind')
         need(type(site['proof']) is str and site['proof'].strip(), 'source/report site proof required')
         fields = site['fields']
-        need(type(fields) is dict and {'file', 'function', 'line'} <= set(fields), 'site/source fields required')
+        static = name in statics
+        need(type(fields) is dict, 'site fields required')
+        if static:
+            need(site['kind'] == 'upload' and set(fields) == {'variable'}, 'static symbol-only upload required')
+            need(re.fullmatch(r'_st_[a-zA-Z0-9_]{1,256}', fields['variable'] or ''), 'exact compiler static symbol required')
+        else:
+            need({'file', 'function', 'line'} <= set(fields), 'site/source fields required')
         need(not {'device', 'threadid', 'bytes', 'devaddr'} & set(fields), 'reserved site fields')
         for key, value in fields.items():
             need(re.fullmatch('[a-z_][a-z0-9_]*', key), 'invalid notification key')
@@ -176,7 +191,8 @@ def policy_check(policy, checked):
                 need(site['kind'] == 'launch' and key in ('num_gangs', 'num_workers', 'vector_length', 'grid', 'block'), 'unbounded dynamic metadata forbidden')
             else:
                 need(type(value) is str and value and '\n' not in value and '\r' not in value and '\x00' not in value, 'fixed field value required')
-        need(re.fullmatch('[1-9][0-9]*', fields['line'] or ''), 'positive source line required')
+        if not static:
+            need(re.fullmatch('[1-9][0-9]*', fields['line'] or ''), 'positive source line required')
         if site['kind'] in ('alloc', 'delete'):
             need(fields == dict(file='(OpenACC API)', function='acc_malloc' if site['kind']=='alloc' else 'acc_free', line='1'), 'known allocation API fields required')
     need(sum(site['kind']=='delete' for site in sites.values()) == 1, 'exactly one logical acc_free delete site required')
@@ -188,12 +204,14 @@ def policy_check(policy, checked):
         names = [explicit[kind]] if kind == 'launch' else explicit[kind]
         for name in names:
             need(name in sites and sites[name]['kind'] == kind, 'explicit site kind/name')
+            need(name not in statics, 'static site cannot be an explicit evaluation transfer')
     metadata = policy['metadata']
     need(type(metadata) is list, 'metadata list required, empty only after source/report review')
     for item in metadata:
         keys(item, ('gap', 'site', 'bytes', 'proof'), 'metadata')
         integer(item['gap'], 0, 15); integer(item['bytes'], 0, (1 << 31) - 1)
         need(item['site'] in sites and sites[item['site']]['kind'] not in ('launch','alloc','delete','free'), 'metadata/construct site')
+        need(item['site'] not in statics, 'static site cannot be per-call metadata')
         need((item['bytes'] > 0) == (sites[item['site']]['kind'] in ('upload','download')), 'metadata/construct byte shape')
         need(type(item['proof']) is str and item['proof'].strip(), 'metadata source/report proof required')
     keys(policy['process_notices'], ('python', 'pthread'), 'process notices')
@@ -204,10 +222,30 @@ def policy_check(policy, checked):
             for item in rows:
                 keys(item, ('site', 'bytes', 'proof'), 'process notice')
                 need(item['site'] in sites and sites[item['site']]['kind'] not in ('launch','alloc','delete','free'), 'process notice site')
+                need(item['site'] not in statics, 'static site cannot be a process notice')
                 integer(item['bytes'], 0, (1 << 31) - 1)
                 need((item['bytes'] > 0) == (sites[item['site']]['kind'] in ('upload','download')), 'process notice bytes')
                 need(type(item['proof']) is str and item['proof'].strip(), 'process notice proof')
     return plan, prepared
+
+
+def static_sites(policy):
+    """Schema 2: exact two compiler symbols, two modules in Python, one in C."""
+    prefixes = policy['static_prefix']
+    keys(prefixes, ('python', 'pthread'), 'static prefix streams')
+    counters = {}
+    for stream, count in (('python', 4), ('pthread', 2)):
+        items = prefixes[stream]
+        need(type(items) is list and len(items) == count, 'exact static prefix cardinality')
+        for item in items:
+            keys(item, ('site', 'bytes', 'proof'), 'static prefix notice')
+            need(type(item['site']) is str and item['site'] in policy['sites'], 'static prefix site required')
+            need(type(item['bytes']) is int and item['bytes'] == 144, 'exact 144-byte static upload required')
+            need(type(item['proof']) is str and item['proof'].strip(), 'static source/compiler/runtime proof required')
+        counters[stream] = Counter(item['site'] for item in items)
+    need(len(counters['pthread']) == 2 and set(counters['pthread'].values()) == {1}, 'two distinct static symbols required')
+    need(counters['python'] == Counter({name: 2 for name in counters['pthread']}), 'two Python modules required')
+    return set(counters['pthread'])
 
 
 def payload(line):
@@ -311,7 +349,17 @@ def process_events(policy, stream, position):
 
 def compare(raw, rows, policy, stream):
     parsed = parse_notice_rows(raw, policy['sites'])
-    actual = [(r['site'], 0 if r['kind']=='delete' else r['bytes']) for r in parsed if r['kind'] not in ('alloc','free')]
+    ordinary = parsed
+    if policy.get('schema_version') == 2:
+        statics = static_sites(policy)
+        prefix = policy['static_prefix'][stream]
+        count = len(prefix)
+        need(all(r['kind'] == 'upload' for r in parsed[:count]) and
+             Counter((r['site'], r['bytes']) for r in parsed[:count]) ==
+             Counter((item['site'], item['bytes']) for item in prefix), 'exact raw static prefix differs')
+        need(not any(r['site'] in statics for r in parsed[count:]), 'static upload outside initial raw prefix')
+        ordinary = parsed[count:]
+    actual = [(r['site'], 0 if r['kind']=='delete' else r['bytes']) for r in ordinary if r['kind'] not in ('alloc','free')]
     expected = process_events(policy, stream, 'prefix')
     for row in rows:
         expected.extend(call_events(row, policy))
@@ -326,7 +374,7 @@ def compare(raw, rows, policy, stream):
         addresses=sorted({r['devaddr'] for r in parsed if r['kind']==kind})) for kind in ('alloc','delete','free')}
     return dict(notices=len(parsed), kinds=dict(counts), runtime_api_observations=observed,
                 logical_delete_phase='serial cleanup per planned call' if stream=='python' else 'aggregate only',
-                upload_bytes=sum(n for name, n in actual if policy['sites'][name]['kind'] == 'upload'),
+                upload_bytes=sum(r['bytes'] for r in parsed if r['kind'] == 'upload'),
                 download_bytes=sum(n for name, n in actual if policy['sites'][name]['kind'] == 'download'))
 
 

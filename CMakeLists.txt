@@ -99,6 +99,7 @@ if(BUILD_TESTING)
   add_test(NAME openacc_backend_trace_selfchecks
     COMMAND "${CMAKE_COMMAND}" -E env "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
       "${Python3_EXECUTABLE}" -m pytest -q -ra -p no:cacheprovider
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_backend_trace/test_pure.py")
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_backend_trace/test_pure.py"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_backend_trace/test_policy_v2.py")
   set_tests_properties(openacc_backend_trace_selfchecks PROPERTIES TIMEOUT 120)
 endif()

@@ -6,10 +6,34 @@ It never invokes a process, Git, a compiler, an evaluator or a shared library,
 and never reads environment variables. No native/GPU/scientific calculation
 was run while authoring it. Invented pure-test PASS is parser preparation only.
 
+Schema 2 retains every ordinary sequence/count gate and adds a narrow static
+initialization prefix. It requires `runtime.native_wrapper` and the exact
+`runtime.libraries.{host,device,notify}` artifact receipts. The trusted native
+wrapper must eagerly load the bound public SO and bridge with `RTLD_LOCAL`, hold
+both handles through the same pytest run, and call no native entrypoint itself.
+The installed runtime's all-module initialization walk must independently prove
+the resulting prefix before freeze; eager loading alone is not that proof.
+
+`static_prefix` has exactly the `python` and `pthread` lists. Each item contains
+`site`, `bytes` (exact integer144), and nonempty `proof`. Exactly two distinct
+sites appear once each for pthread and twice each for Python's two modules.
+Each referenced site has kind `upload` and fields exactly `{variable: <the exact
+compiler registration symbol>}`. No invented file/function/line is permitted.
+The first4 Python or first2 pthread RAW rows must equal that exact multiset;
+even an intervening alloc/free is rejected. Static sites cannot appear later,
+or in explicit transfers, per-call metadata or process notices. All ordinary
+Python rows still compare in exact serial order; pthread remains aggregate only.
+`upload_bytes` includes the static bytes. The symbol identities and exact two
+physical-free sites must be independently rederived from the final compiled
+source/installed runtime, never fitted from the candidate capture.
+
+Schema1 remains available for earlier preparation/parser fixtures. New complete
+packages that need static uploads must use schema2 and bind its runtime proof.
+
 Run only the pure preparation tests during authoring:
 
 ```text
-python -m pytest -q -p no:cacheprovider tests/openacc_backend_trace/test_pure.py
+python -B -m pytest -q -p no:cacheprovider tests/openacc_backend_trace/test_pure.py tests/openacc_backend_trace/test_policy_v2.py
 ```
 
 The checker rejects unknown lines, blank lines, unknown or duplicate keys,
