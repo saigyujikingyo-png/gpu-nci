@@ -14,11 +14,12 @@ Updated 2026-10-21 (Europe/London).
 | Reader-to-ABI adapter and offline CLI | Merged PR #4/#5/#6/#7, synthetic PASS | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
 | CPU X-slab execution | Merged PR #8/#9/#10/#11, combined and complete-tree synthetic PASS | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
 | M3A OpenACC numerical portability | Finite synthetic PASS | 36 scalar / 9 RDG / 9 point records; actual NVIDIA kernels and independent verification; [results](openacc-probe-results.md) |
+| M3B0 OpenACC resource prerequisite | Finite synthetic PASS | 79 exact values, 240 ownership events, six failure/recovery cases and two live instances; [results](openacc-resource-results.md) |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and a finite Sol-managed package required |
 | Performance | NOT_RUN | No speedup claim |
 
-Merged main `a1ebe23` supports complete dense grids and canonical X slabs under
+The merged CPU implementation supports complete dense grids and canonical X slabs under
 the same ABI; other partial layouts remain rejected.
 Initial results retain scientific-uncertainty flags until independent input
 quantization and grid-convergence information is available.

@@ -2,6 +2,8 @@
 
 Base: merged M3A `34b387016e57ba4d820d2046ba8c29278f2e5784`.
 This is implementation planning, not a claim that the public GPU backend exists.
+The standalone M3B0 prerequisite has now passed its
+[finite resource checks](openacc-resource-results.md); M3B1 and M3B2 remain unimplemented.
 The science in `numerics.md`, ABI v1, CUBE conventions, masks, tolerances and
 canonical X-slab contract remain unchanged.
 

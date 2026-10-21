@@ -1,12 +1,12 @@
 # M3B0 OpenACC resource gate implementation
 
-Status: **implemented; first native attempt failed independent verification;
-device-diagnostic fix NOT_YET_EXECUTED / NOT_YET_ACCEPTED.**
-This is the candidate for the frozen [M3B0 contract](openacc-resource-contract.md).
-It is not the public GPU backend. There is no accepted M3B0 pass,
-real-data acceptance or performance claim.
-Production CPU code, ABI, CLI, M3A sources/fixtures, root CMake and the
-contract are unchanged.
+Status: **finite native resource acceptance PASS after the diagnostic fix.**
+The [results and exact tested revision](openacc-resource-results.md) describe
+the accepted scope and preserved first failure under the frozen
+[M3B0 contract](openacc-resource-contract.md). This is not the public GPU backend;
+real-data acceptance and performance remain unestablished. Production CPU code,
+ABI, CLI, M3A sources/fixtures and the contract are unchanged. Root CMake only
+adds the independent resource-verifier selfchecks; the candidate stays standalone.
 
 ## Source layout
 
@@ -247,14 +247,14 @@ exit status does not override the verifier.
 The producer now terminates each property at the first NUL using a pure,
 bounded helper and the host assertions described above. The resource contract,
 fixtures, verifier and device/resource sequence are unchanged. This fix has
-not yet been compiled or executed in a native rerun, and no new acceptance is
-claimed. Its build, host assertions and device sequence require a separately
-reviewed finite execution package.
+now passed compilation, all seven host assertions and the fixed device sequence
+in a new separately reviewed finite package at source `07aa8ffb`. The unchanged
+strict verifier and independent evidence review accepted that attempt; see
+[results](openacc-resource-results.md). The first failure remains unaccepted.
 
 ## Not established
 
-- Accepted behaviour on an actual NVIDIA device after the diagnostic fix,
-  which requires a new bounded execution owned by the Sol manager.
+- Behaviour beyond the finite resource case accepted on the recorded device.
 - What the runtime does when a real `acc_malloc` fails. It may terminate
   instead of returning `C_NULL_DEVPTR`; that would be a fatal runtime
   failure, not a recoverable status.
