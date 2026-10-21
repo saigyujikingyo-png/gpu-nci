@@ -6,7 +6,8 @@ The standalone M3B0 prerequisite passed its
 has now passed [independently accepted finite synthetic validation](openacc-public-results.md)
 under the reviewed [public-library contract](openacc-public-contract.md).
 M3B2 CLI integration has also passed [finite synthetic validation](openacc-cli-results.md).
-Next is the separately reviewed M4 real-density and performance work.
+M4's first [stored-water case](water-validation.md) has conditional scientific
+acceptance. Separate P1 performance work remains NOT_RUN; V4 comparison is undone.
 The science in `numerics.md`, ABI v1, CUBE conventions, masks, tolerances and
 canonical X-slab contract remain unchanged.
 

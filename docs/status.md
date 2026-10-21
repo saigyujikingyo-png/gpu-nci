@@ -18,8 +18,9 @@ Updated 2026-10-21 (Europe/London).
 | M3B1 public OpenACC library | Finite synthetic PASS | Source `e751417`; 22 GNU CTests, 1006 CPU pytest passes / one known skip, 148 native passes, 278 GPU kernels; [results](openacc-public-results.md) |
 | M3B2 offline OpenACC CLI | Finite synthetic PASS | Source `001cf5c`; 23 GNU CTests, 1068 CPU pytest passes / one known skip, 29 native passes, 97 GPU kernels; [results](openacc-cli-results.md) and [contract](openacc-cli-contract.md) |
 | OpenACC SDK and device | Verified for the finite tested scope | NVHPC 26.9 / CUDA 13.3 / cc120 on RTX 5070 Laptop GPU; [M3B1 evidence](openacc-public-results.md) |
-| Real-density scientific validation | NOT_RUN | Matching source data and an independently reviewed finite package executed by GPT-6.1 Sol required |
-| Performance | NOT_RUN | No speedup claim |
+| M4 real-density scientific validation | SCIENTIFIC_ACCEPTED_CONDITIONAL | Public stored RHF/STO-3G water model, fixed ROI, independent references; actual GPU trace/resource/cleanup acceptance; [results and conditions](water-validation.md) |
+| V4 same-density NCIPLOT/CRITIC2 comparison | NOT_PERFORMED | No external-tool pointwise equivalence or chemical validation claimed |
+| P1 performance | NOT_RUN | Separate timing package under preparation/review; no speedup claim |
 
 The merged CPU implementation supports complete dense grids and canonical X slabs under
 the same ABI; other partial layouts remain rejected.
@@ -169,8 +170,10 @@ The C ABI structure, exported symbols, numerical evaluator, 61-point stencil,
 thresholds and uncertainty policy are unchanged. The CLI retains the full rho
 array and buffers only one slab's additional input and output fields. This is
 not out-of-core input and its tracked allocation allowance is not a whole-process
-RSS cap. OpenMP scaling, GPU-NCI fields, real-density acceptance and speedup remain
-NOT_RUN. Reproduction commands are in [integration](integration.md).
+RSS cap. At this M2 milestone, OpenMP scaling, GPU-NCI fields, real-density
+acceptance and speedup were NOT_RUN. Later results are indexed above;
+OpenMP scaling and speedup remain unmeasured. Reproduction commands are in
+[integration](integration.md).
 
 Following explicit approval, #9, #10 and #11 were merged into #8 in that order.
 The complete integration tree `1f118a1dc1504bfbe4b12228e0023c7fad852157` then passed
@@ -196,5 +199,6 @@ the contract, reviewed the three branches and verified the combined results.
 There is no model or network dependency at
 scientific runtime. No unauthorized group data was used.
 
-`RESEARCH_HANDOFF.md` remains deferred until a real end-to-end scientific case
-has run and been accepted, as specified in [development](development.md).
+The first accepted real-density case is documented in [water validation](water-validation.md).
+The five-minute [research handoff](../RESEARCH_HANDOFF.md) records its conditional
+scope, AI development/review roles, missing capabilities and unmeasured performance.

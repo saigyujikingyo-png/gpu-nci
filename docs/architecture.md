@@ -7,7 +7,8 @@ The offline CLI and native adapter pass combined synthetic checks under the
 support follows the [M2 contract](slab-contract.md) and passes combined synthetic
 checks and is merged. The optional [M3B1 public GPU backend](openacc-public-results.md)
 and [M3B2 offline GPU CLI](openacc-cli-results.md) now pass finite synthetic
-validation. Real-density science and performance remain unaccepted.
+validation. The first [stored-water real-density case](water-validation.md)
+has conditional scientific acceptance; performance remains NOT_RUN.
 
 ```mermaid
 flowchart LR

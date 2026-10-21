@@ -27,11 +27,12 @@ including explicit GPU selection, checked memory plans and original runtime
 trace attribution. Its first failed attempt and the minimal runtime-link repair
 are recorded separately from the accepted run.
 
-Work next proceeds to M4 as set out in the [backend plan](openacc-backend-plan.md):
-prepare a public stored-wavefunction case, an independent CPU density/derivative
-reference, and fixed grid-convergence and input-precision checks. Each finite
-package needs independent review, freeze, Sol-managed execution and acceptance.
-Scientific and performance acceptance remain pending.
+M4's first [public stored-water case](water-validation.md) now has conditional
+scientific acceptance, with independent CPU references, fixed grid-convergence
+and input-precision checks, actual GPU trace acceptance and cleanup. Performance
+(P1) remains NOT_RUN and V4 external-tool comparison remains NOT_PERFORMED.
+Next is a separate finite timing package under the [backend plan](openacc-backend-plan.md).
+Each package needs independent review, freeze, Sol-managed execution and acceptance.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and
@@ -83,6 +84,9 @@ Preparation, build, synthetic validation, scientific acceptance and performance
 reporting remain separate states.
 
 ## Research handoff gate
+
+The first accepted M4 case opens this gate; [RESEARCH_HANDOFF.md](../RESEARCH_HANDOFF.md)
+now records the accepted scope and unmeasured performance explicitly.
 
 Create `RESEARCH_HANDOFF.md` only after the first end-to-end scientific case
 has actually run and its outputs have been checked. A synthetic unit-test pass

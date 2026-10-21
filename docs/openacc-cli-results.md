@@ -129,9 +129,9 @@ All fixtures here are generated synthetic data, with no research-group inputs.
 
 ## Remaining limits
 
-Real-density scientific acceptance, performance and physical peak VRAM remain
-unmeasured/unaccepted. No speedup follows from synthetic correctness or runtime
-notices. `RESEARCH_HANDOFF.md` remains deferred until an actual end-to-end
-scientific case has run and been accepted. M4's first stored-wavefunction case,
-CPU reference, grid convergence and measurement package need their own review,
-freeze, Sol-managed execution and independent acceptance.
+This M3B2 report establishes synthetic correctness, not a speedup or physical
+peak-VRAM measurement. The subsequent M4 [stored-water case](water-validation.md)
+has conditional scientific acceptance under its own reviewed, frozen execution
+and independent acceptance. The [research handoff](../RESEARCH_HANDOFF.md) now
+records that scope. P1 performance remains NOT_RUN and V4 same-input external-tool
+comparison remains NOT_PERFORMED.
