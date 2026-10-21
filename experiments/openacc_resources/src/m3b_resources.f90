@@ -61,6 +61,7 @@ program m3b_resources
 
   if (command_argument_count() /= 0) &
     call stop_with(EXIT_CHECK_FAILED, 'CHECK_FAILED the harness takes no arguments')
+  call check_device_property_prefix()
   call select_nvidia_device()
   call emit('M3B0 1')
   do i = 1, INSTANCES
@@ -141,6 +142,36 @@ program m3b_resources
 
 contains
 
+  !> Retain the bounded C string prefix; Fortran TRIM alone keeps NUL padding.
+  !> A property with no NUL retains all its characters, including a full buffer.
+  pure function device_property_prefix(raw) result(text)
+    character(len=*), intent(in) :: raw
+    character(len=len(raw)) :: text
+    integer :: first_nul
+    text = raw
+    first_nul = index(raw, achar(0))
+    if (first_nul > 0) text(first_nul:) = ' '
+  end function device_property_prefix
+
+  !> Silent host-only checks, before any device call; no protocol counters change.
+  subroutine check_device_property_prefix()
+    character(len=256) :: raw
+    raw = 'NVIDIA'//repeat(achar(0), len(raw) - 6)
+    call require(trim(device_property_prefix(raw)) == 'NVIDIA', 'NUL-padded device property')
+    raw = repeat('X', len(raw))
+    call require(len_trim(device_property_prefix(raw)) == len(raw) .and. &
+                 device_property_prefix(raw) == raw, 'full-width device property without NUL')
+    raw = achar(0)//'hidden'
+    call require(len_trim(device_property_prefix(raw)) == 0, 'leading NUL device property')
+    raw = 'NV'//achar(0)//'hidden'//achar(0)//'tail'
+    call require(trim(device_property_prefix(raw)) == 'NV', 'first embedded NUL device property')
+    raw = ' '
+    call require(len_trim(device_property_prefix(raw)) == 0, 'blank device property')
+    call require(len(device_property_prefix('')) == 0, 'empty device property')
+    raw = '  vendor name  '
+    call require(trim(device_property_prefix(raw)) == '  vendor name', 'space-padded device property')
+  end subroutine check_device_property_prefix
+
   !> Explicit NVIDIA selection of device 0; its identity goes to stderr.
   subroutine select_nvidia_device()
     integer :: devices
@@ -159,8 +190,9 @@ contains
     call acc_get_property_string(0, acc_device_nvidia, acc_property_vendor, vendor)
     call acc_get_property_string(0, acc_device_nvidia, acc_property_driver, driver)
     call diag('M3B0_DEVICE nvidia_devices='//itoa(devices)//' selected='// &
-              itoa(acc_get_device_num(acc_device_nvidia))//' name="'//trim(name)// &
-              '" vendor="'//trim(vendor)//'" driver="'//trim(driver)//'"')
+              itoa(acc_get_device_num(acc_device_nvidia))//' name="'//trim(device_property_prefix(name))// &
+              '" vendor="'//trim(device_property_prefix(vendor))//'" driver="'// &
+              trim(device_property_prefix(driver))//'"')
   end subroutine select_nvidia_device
 
   !> One kernel case: poison the caller destination, execute, accept the

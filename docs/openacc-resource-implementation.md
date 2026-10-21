@@ -1,9 +1,10 @@
 # M3B0 OpenACC resource gate implementation
 
-Status: **implemented and compile-checked; native execution NOT_EXECUTED.**
+Status: **implemented; first native attempt failed independent verification;
+device-diagnostic fix NOT_YET_EXECUTED / NOT_YET_ACCEPTED.**
 This is the candidate for the frozen [M3B0 contract](openacc-resource-contract.md).
-It is not the public GPU backend. No test has run it, so there is no test
-pass, device-offload evidence, real-data acceptance or performance claim.
+It is not the public GPU backend. There is no accepted M3B0 pass,
+real-data acceptance or performance claim.
 Production CPU code, ABI, CLI, M3A sources/fixtures, root CMake and the
 contract are unchanged.
 
@@ -122,7 +123,14 @@ value and a 32-bit store of the marker. It contains no FMA.
 
 ## Harness
 
-The program takes no arguments and selects NVIDIA device 0. Without such a
+The program takes no arguments. Before any device call, silent host assertions
+check the device-property prefix helper with NUL padding, a full 256-character
+buffer without NUL, leading and embedded NUL, content after the first NUL,
+blank and zero-length strings, and ordinary space padding. A failed assertion
+uses the existing CHECK_FAILED exit path. Successful assertions add no I/O,
+device calls, transfers or protocol counts.
+
+The program then selects NVIDIA device 0. Without such a
 device it exits 3 with `M3B0_NOT_TESTED` on stderr and nothing on stdout.
 It then runs exactly the contract sequence:
 
@@ -144,7 +152,10 @@ stderr lines use these prefixes:
 - `M3B0_RESOURCE`: the frozen event grammar. Events are drained after every
   prepare and release (240 expected).
 - `M3B0_DEVICE`: device count, the selected index and the name, vendor and
-  driver strings.
+  driver strings. Each property uses only the bounded prefix before its first
+  NUL, blank-padding the remainder before applying Fortran TRIM. A property
+  without NUL retains its full buffer contents before TRIM. No other diagnostic
+  or runtime output is rewritten.
 - `M3B0_LEDGER`: ledger bytes and dropped events per instance.
 - `M3B0_TOTALS`: event, upload, download and kernel totals and bytes, peak
   objects and bytes, caller bytes and live caller arrays.
@@ -217,15 +228,33 @@ stdout/stderr. `tools/` holds the scripts that ran them.
   `m3b_workspace_add_one_582_gpu` with no FMA instruction and no
   `acc_shutdown` or error-routine symbol. Binary SHA-256:
   `ed399c2bec56e788fc58ef5f2bb362d7eb8373ddf2fdb9971becd5b4a7a51dca`.
-  Later documentation-only commits do not change these source files.
+  The later documentation-only commits through `ae89ee9` do not change these
+  source files; the diagnostic fix described below is outside this receipt.
 
-No candidate, test binary, solver or benchmark was executed and
-`nvidia-smi` was not used.
+During the compile-only evidence phase, no candidate, test binary, solver or
+benchmark was executed and `nvidia-smi` was not used.
+
+## First native attempt and diagnostic fix
+
+On 2026-10-21, source commit
+`ae89ee99717b7d5eac0218f5ba19354946f63f03` exited 0 in its first native
+attempt, but the unchanged strict verifier exited 1 with
+`stderr: control character`. The first device diagnostic contained 723 NUL
+bytes: NVHPC's property strings used C NUL padding, which Fortran TRIM does
+not remove. The attempt remains **FAILED / NOT_ACCEPTED**; the candidate's
+exit status does not override the verifier.
+
+The producer now terminates each property at the first NUL using a pure,
+bounded helper and the host assertions described above. The resource contract,
+fixtures, verifier and device/resource sequence are unchanged. This fix has
+not yet been compiled or executed in a native rerun, and no new acceptance is
+claimed. Its build, host assertions and device sequence require a separately
+reviewed finite execution package.
 
 ## Not established
 
-- Behaviour on an actual NVIDIA device, which is the single bounded
-  execution owned by the new Sol manager.
+- Accepted behaviour on an actual NVIDIA device after the diagnostic fix,
+  which requires a new bounded execution owned by the Sol manager.
 - What the runtime does when a real `acc_malloc` fails. It may terminate
   instead of returning `C_NULL_DEVPTR`; that would be a fatal runtime
   failure, not a recoverable status.
@@ -238,4 +267,5 @@ No candidate, test binary, solver or benchmark was executed and
 
 AI assistance: Claude Opus 5.5 max wrote this experiment and document.
 The contract is GPT-6 Astra's; fixtures, verification and execution belong
-to GPT-6.1 Sol. Only synthetic data is involved.
+to GPT-6.1 Sol, which also added the diagnostic prefix fix and host assertions.
+Only synthetic data is involved.
