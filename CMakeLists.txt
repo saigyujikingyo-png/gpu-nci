@@ -28,6 +28,7 @@ set(NCI_CLI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cli" CACHE PATH "Python CLI directo
 set(NCI_CLI_TEST_DIR "${NCI_CLI_DIR}/../tests/cli" CACHE PATH "CLI unit tests directory")
 set(NCI_E2E_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e" CACHE PATH "Independent CLI end-to-end tests")
 set(NCI_OPENACC_PROBE_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_probe" CACHE PATH "Pure independent probe verifier selfchecks; never executes a GPU")
+set(NCI_OPENACC_RESOURCE_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/openacc_resources" CACHE PATH "Pure independent resource verifier selfchecks; never executes a GPU")
 set(NCI_BUILD_REVISION "UNKNOWN" CACHE STRING "Explicit source revision declaration; UNKNOWN unless supplied by builder")
 if(EXISTS "${NCI_CPU_SOURCE_DIR}/CMakeLists.txt")
   add_subdirectory("${NCI_CPU_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/cpu")
@@ -67,4 +68,10 @@ if(BUILD_TESTING AND EXISTS "${NCI_OPENACC_PROBE_TEST_DIR}/test_verify.py")
   add_test(NAME openacc_probe_verifier_selfchecks
     COMMAND "${Python3_EXECUTABLE}" -m pytest -q -ra "${NCI_OPENACC_PROBE_TEST_DIR}")
   set_tests_properties(openacc_probe_verifier_selfchecks PROPERTIES TIMEOUT 120)
+endif()
+if(BUILD_TESTING AND EXISTS "${NCI_OPENACC_RESOURCE_TEST_DIR}/test_verify.py")
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME openacc_resource_verifier_selfchecks
+    COMMAND "${Python3_EXECUTABLE}" -m pytest -q -ra "${NCI_OPENACC_RESOURCE_TEST_DIR}")
+  set_tests_properties(openacc_resource_verifier_selfchecks PROPERTIES TIMEOUT 120)
 endif()

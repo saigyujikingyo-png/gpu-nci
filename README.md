@@ -9,8 +9,10 @@ CPU CLI passed combined synthetic validation in three compiler configurations
 and was merged after independent review and user approval. CPU X-slab support
 passed combined and complete-tree synthetic validation and is merged in main.
 The isolated M3A [OpenACC portability probe passed](docs/openacc-probe-results.md)
-54 fixed synthetic records on an RTX 5070 Laptop GPU. Public GPU dispatch
-remains unimplemented.
+54 fixed synthetic records on an RTX 5070 Laptop GPU. The subsequent standalone
+[M3B0 resource gate passed](docs/openacc-resource-results.md) its frozen
+allocation, cleanup and two-instance transport checks on the same GPU model.
+Public GPU dispatch remains unimplemented.
 OpenMP scaling measurements remain unrun.
 See [current status](docs/status.md).
 **No GPU NCI backend, scientific reproduction, or speedup is claimed.**
