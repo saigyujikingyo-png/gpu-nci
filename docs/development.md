@@ -39,7 +39,7 @@ Debug/Release and NVHPC CPU Debug. The merged M2 implementation adds full-grid/s
 equivalence under the same configurations. The implementation preserves source
 declarations, units, Z-fastest order and matrix conventions, without authenticating
 the input's scientific provenance. OpenMP scaling measurements
-still require a bounded manual package; thread consistency tests establish no
+require a bounded Sol-managed package; thread consistency tests establish no
 speedup conclusion.
 
 The original design remains frozen outside this repository. A toolchain

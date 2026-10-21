@@ -15,7 +15,7 @@ Updated 2026-10-21 (Europe/London).
 | CPU X-slab execution | Merged PR #8/#9/#10/#11, combined and complete-tree synthetic PASS | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
 | M3A OpenACC numerical portability | Finite synthetic PASS | 36 scalar / 9 RDG / 9 point records; actual NVIDIA kernels and independent verification; [results](openacc-probe-results.md) |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
-| Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
+| Real-density scientific validation | NOT_RUN | Matching source data and a finite Sol-managed package required |
 | Performance | NOT_RUN | No speedup claim |
 
 Merged main `a1ebe23` supports complete dense grids and canonical X slabs under

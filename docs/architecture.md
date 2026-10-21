@@ -100,5 +100,6 @@ mixed-derivative corner halos are covered by independent finite fixtures.
 Independent worktrees can be compiled together through root CMake source-path
 options. That is a validation operation, not a Git merge or release. Small
 synthetic tests establish only their stated engineering/numerical properties.
-Real-density studies and benchmarks use a later finite manual execution package
-with its own inputs, limits, hashes, exit status and acceptance record.
+Real-density studies and benchmarks use a finite execution package managed by
+a GPT-6.1 Sol subagent under the [standing authorization](development.md), with
+its own inputs, limits, hashes, exit status and acceptance record.
