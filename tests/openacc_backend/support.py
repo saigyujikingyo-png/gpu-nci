@@ -13,6 +13,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tests/oracle'))
 from reference.abi import (Library, Options, Stats, Tile, DOUBLE_P, U8_P, ptr,
                            options, OK)
+if __package__:
+    from .mapped_limit import guarded_error, proof_blob, check_error_guard
+else:
+    from mapped_limit import guarded_error, proof_blob, check_error_guard
 
 FIELDS = ('rdg', 'signedrho', 'lambda2', 'grad', 'hess', 'flags')
 MAX_EVALS = 512
@@ -140,11 +144,15 @@ class Recorder:
         self.evaluations += 1
         before = byte_snapshot(case)
         error = ct.create_string_buffer(512)
+        special = case_id == 'reject/mapped-object-limit'
+        if special:
+            error, error_storage = guarded_error()
         args = [handle, ct.byref(case.tile), ptr(case.rho), ptr(case.rdg),
                 ptr(case.signedrho), ptr(case.lambda2), ptr(case.grad), ptr(case.hess),
                 ptr(case.flags, U8_P), ct.byref(case.stats), error, len(error)]
         for index, value in (arguments or {}).items():
             args[index] = value
+        span_proof = proof_blob(case, args, error_storage) if special else None
         rc = self.raw.evaluate(*args)
         state=self.context_states[handle.value]
         state['eval_ordinal']+=1
@@ -153,6 +161,8 @@ class Recorder:
         blobs = {'input-rho': before['rho'], 'tile': before['tile'],
                  'stats-before': before['stats'], 'stats-after': after['stats'],
                  'errbuf': error.raw}
+        if special:
+            blobs['preflight-spans'] = span_proof
         for name in FIELDS:
             if after[name] is not None:
                 blobs[name] = after[name]
@@ -163,6 +173,8 @@ class Recorder:
         # Retain the same-object observer immediately, even if later assertions fail.
         if hasattr(self,'hooks'):
             self.hooks.observe(self,handle)
+        if special:
+            check_error_guard(error_storage)
         check_guards(case)
         assert before['rho'] == after['rho'], 'caller rho was changed'
         assert before['tile'] == after['tile'], 'caller descriptor was changed'

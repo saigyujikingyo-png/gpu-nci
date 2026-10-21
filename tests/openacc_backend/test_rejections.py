@@ -1,5 +1,6 @@
 """No-write public preflight, byte counts and selector failures; no optional skips."""
 import ctypes as ct
+from contextlib import nullcontext
 import numpy as np
 import pytest
 from .support import guard_case, byte_snapshot, assert_unchanged
@@ -9,6 +10,7 @@ from reference.abi import (Evaluation, options, OK, INVALID_ARGUMENT, UNSUPPORTE
 from slab_cases import slab, extreme_case
 from reference.fields import fd4
 from slab_cases import assert_reference
+from .mapped_limit import NZ, COUNT, ERROR, reserve
 
 BAD_OPTIONS = [('abi_version',0), ('struct_bytes',41), ('reserved',1),
     ('backend',99), ('output_mode',99), ('omp_threads',0), ('omp_threads',17),
@@ -76,10 +78,10 @@ def mutated(kind):
         case.rho[-1,-1,-1] = float('nan') if kind == 'halo-nan' else -1e-9
         expected = INVALID_INPUT
     elif kind == 'mapped-object-limit':
-        shape = (5,5,1 << 24)  # backing arrays remain 315 points; plan must reject before rho read
+        shape = (5,5,NZ)  # Only packed object5 exceeds INT32_MAX; no rho read is permitted.
         case.tile.global_n[:] = case.tile.tile_count[:] = case.tile.input_shape[:] = shape
         case.tile.input_strides[:] = (shape[1]*shape[2],shape[2],1)
-        count = 25*(1 << 24)
+        count = COUNT
         case.tile.rho_capacity = case.tile.field_capacity = case.tile.flags_capacity = count
         case.tile.grad_capacity, case.tile.hess_capacity = 3*count,6*count
         expected = UNSUPPORTED
@@ -90,12 +92,15 @@ def mutated(kind):
 @pytest.mark.parametrize('kind', MUTATIONS)
 def test_rejected_input_is_bytewise_atomic(public, kind):
     case, expected = mutated(kind)
-    ct.memset(ct.byref(case.stats),0x3C,88)
-    before = byte_snapshot(case)
-    with public.context(gpu_options(),kind) as handle:
-        rc, error = public.run(handle,case,'reject/'+kind)
-    assert rc == expected, error
-    assert_unchanged(case,before)
+    with reserve(case) if kind == 'mapped-object-limit' else nullcontext(case):
+        ct.memset(ct.byref(case.stats),0x3C,88)
+        before = byte_snapshot(case)
+        with public.context(gpu_options(),kind) as handle:
+            rc, error = public.run(handle,case,'reject/'+kind)
+        assert rc == expected, error
+        if kind == 'mapped-object-limit':
+            assert error == ERROR
+        assert_unchanged(case,before)
 
 
 @pytest.mark.parametrize('index', [0,1,2,3,4,5,6,7,8,9,10])

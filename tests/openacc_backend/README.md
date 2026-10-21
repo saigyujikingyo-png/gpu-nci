@@ -141,3 +141,25 @@ loader provenance, no fallback/recomputation, timeouts and true process exits
 remain controller/reviewer responsibilities. Raw bound/tau and all eigenvalues
 are not exposed by the frozen B1 hook; M3A evidence and source review retain
 their narrower role. No real-density scientific acceptance or speedup claim.
+
+The `mapped-object-limit` rejection uses a Linux-only test reservation so the
+common alias gate passes before the checked OpenACC plan. Its derived declared
+shape is 5x5x894785: only packed object5 exceeds INT32_MAX (2147484000 bytes).
+One private anonymous PROT_NONE arena reserves exactly2348826624 virtual bytes.
+Seven disjoint guarded315-point backings expose only45056 page-rounded RW bytes;
+guarded stats216 and errbuf640 bytes are separate, for45912 newly accessible
+prefix/guard bytes. Saved original arrays/guards and ordinary process overhead
+also exist; this is not an RSS measurement or a process-memory bound. No physical
+large array is allocated or populated. Unexpected scanning beyond the prefixes
+faults and must fail-stop the native package. Mapping/protection/unmapping errors
+fail without fallback. Case-owned arrays/guards are restored before unmapping.
+
+Recorder captures the actual argument addresses, declared spans and guard-prefix
+bounds immediately before this one public call, then retains them with the
+completed-call receipt in one `preflight-spans` blob
+of at most4096 bytes. The strict receipt checker requires it for this case only,
+checks disjointness/containment/permissions/checked arithmetic and the exact
+object5 rejection message. Existing315-point blobs, statuses, case IDs and call
+counts are unchanged; preparation/output bounds must include one additional file
+of at most4096 bytes. Pure checks use invented intervals and stubbed OS calls;
+any actual full reservation belongs only in a reviewed frozen native attempt.

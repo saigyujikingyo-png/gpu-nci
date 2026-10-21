@@ -1,5 +1,6 @@
 """Pure invented-ledger and fixture checks. Never loads a candidate library."""
 import ctypes as ct
+from contextlib import nullcontext
 import importlib.util
 import json
 import hashlib
@@ -585,3 +586,112 @@ def test_frozen_expectation_sources_unchanged():
     for item in manifest['sources']:
         data=(root/item['path']).read_bytes()
         assert len(data)==item['bytes'] and hashlib.sha256(data).hexdigest()==item['sha256']
+
+
+def invented_span_proof():
+    """Invented addresses only; no OS reservation or candidate is involved."""
+    rows=[];base=0x1000000000;offset=0
+    layout=[('rho',2,8),('rdg',3,8),('signedrho',4,8),('lambda2',5,8),
+            ('grad',6,24),('hess',7,48),('flags',8,1)]
+    round_page=lambda n:(n+4095)//4096*4096
+    for name,arg,width in layout:
+        rows.append(dict(name=name,argument=arg,pointer=base+offset+64,
+            span_bytes=22369625*width,backing_bytes=315*width,prefix_base=base+offset,
+            prefix_bytes=round_page(315*width+128),permissions='rw-prefix/rest-none'))
+        offset+=round_page(22369625*width+128)
+    for i,(name,arg,size) in enumerate([('stats',9,88),('errbuf',10,512)]):
+        start=0x2000000000+4096*i
+        rows.append(dict(name=name,argument=arg,pointer=start+64,span_bytes=size,
+            backing_bytes=size,prefix_base=start,prefix_bytes=size+128,permissions='guarded-rw'))
+    return dict(schema_version=1,arena_base=base,arena_bytes=offset,page_bytes=4096,
+                rw_bytes=45056,external_guard_bytes=856,regions=rows)
+
+
+def test_mapped_limit_proof_selects_only_object5_without_mapping():
+    from .mapped_limit import validate_proof,ERROR
+    case,status=mutated('mapped-object-limit')
+    validate_proof(invented_span_proof(),case.tile)
+    assert status==2 and tuple(case.rho.shape)==tuple(case.flags.shape)==(5,7,9)
+    n=25*894785
+    assert 96*(n-25)<=2**31-1<96*n==2147484000
+    assert ERROR=='OpenACC object 5 needs 2147484000 bytes; the installed runtime supports at most 2147483647 bytes per mapped object'
+
+
+@pytest.mark.parametrize('mutation',['overlap','missing','span','backing','permissions','rw-bound',
+    'arena-bound','address-overflow','page','bool','prefix','external-guard'])
+def test_mapped_limit_proof_rejects_wrong_preconditions(mutation):
+    from .mapped_limit import validate_proof
+    value=invented_span_proof();rows=value['regions']
+    if mutation=='overlap':rows[-1]['pointer']=rows[-2]['pointer'];rows[-1]['prefix_base']=rows[-2]['prefix_base']
+    elif mutation=='missing':rows.pop()
+    elif mutation=='span':rows[0]['span_bytes']-=1
+    elif mutation=='backing':rows[0]['backing_bytes']+=8
+    elif mutation=='permissions':rows[0]['permissions']='all-rw'
+    elif mutation=='rw-bound':value['rw_bytes']=65536
+    elif mutation=='arena-bound':value['arena_bytes']-=4096
+    elif mutation=='address-overflow':value['arena_base']=(1<<63)-4096
+    elif mutation=='page':value['page_bytes']=8192
+    elif mutation=='bool':rows[0]['argument']=True
+    elif mutation=='prefix':rows[1]['prefix_base']+=4096
+    else:rows[-1]['prefix_bytes']-=1
+    with pytest.raises(AssertionError):validate_proof(value,mutated('mapped-object-limit')[0].tile)
+
+
+@pytest.mark.parametrize('failure',['none','body','mmap','mprotect','munmap'])
+def test_mapped_limit_restores_arrays_before_stubbed_unmap(monkeypatch,failure):
+    from . import mapped_limit as m
+    case,_=mutated('mapped-object-limit')
+    original={name:getattr(case,name) for name,_,_ in m.LAYOUT};guards=case._guards
+    before=byte_snapshot(case);calls=[]
+    class FakeOS:
+        def mmap(self,*args):
+            calls.append(('mmap',args))
+            return ct.c_void_p(-1).value if failure=='mmap' else 0x1000000000
+        def mprotect(self,*args):
+            calls.append(('mprotect',args))
+            return int(failure=='mprotect' and len(calls)==4)
+        def munmap(self,*args):
+            assert all(getattr(case,name) is array for name,array in original.items())
+            assert case._guards is guards and not hasattr(case,'_mapped_limit_base')
+            calls.append(('munmap',args));return int(failure=='munmap')
+    monkeypatch.setattr(m,'_system',FakeOS)
+    monkeypatch.setattr(m,'_buffer_at',lambda address,size:np.empty(size,dtype=np.uint8))
+    expected=nullcontext() if failure=='none' else pytest.raises(RuntimeError if failure=='body' else OSError)
+    with expected:
+        with m.reserve(case):
+            check_guards(case)
+            assert all(getattr(case,name) is not array for name,array in original.items())
+            if failure=='body':raise RuntimeError('invented body failure')
+    assert_unchanged(case,before)
+    assert sum(item[0]=='mmap' for item in calls)==1
+    assert sum(item[0]=='munmap' for item in calls)==int(failure!='mmap')
+    if failure=='none':
+        assert sum(args[1] for name,args in calls if name=='mprotect')==45056
+        assert calls[-1]==('munmap',(0x1000000000,2348826624))
+
+
+def test_mapped_limit_proof_captures_actual_args_before_fake_evaluate(tmp_path,monkeypatch):
+    from . import support
+    from .mapped_limit import LAYOUT
+    events=[]
+    def capture(case,args,storage):
+        events.append('proof')
+        for name,index,_ in LAYOUT:
+            assert ct.cast(args[index],ct.c_void_p).value==getattr(case,name).ctypes.data
+        assert ct.cast(args[9],ct.c_void_p).value==ct.addressof(case.stats)
+        assert ct.cast(args[10],ct.c_void_p).value==ct.addressof(storage)+64
+        return b'invented proof artifact; not native evidence'
+    class FakeLibrary(InventedLibrary):
+        def evaluate(self,*args):
+            assert events==['proof'];events.append('evaluate');return 2
+    monkeypatch.setattr(support,'Library',FakeLibrary)
+    monkeypatch.setattr(support,'proof_blob',capture)
+    binary=tmp_path/'invented-library';binary.write_bytes(b'no native code')
+    recorder=Recorder(binary,tmp_path/'records','invented')
+    case,_=mutated('mapped-object-limit')
+    with recorder.context(case_id='context') as handle:
+        recorder.run(handle,case,'reject/mapped-object-limit')
+    record=json.loads((recorder.directory/'0002.json').read_text())
+    artifact=record['artifacts']['preflight-spans']
+    assert Path(artifact['path']).read_bytes()==b'invented proof artifact; not native evidence'
+    assert events==['proof','evaluate']

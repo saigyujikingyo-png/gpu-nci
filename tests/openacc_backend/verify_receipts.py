@@ -21,6 +21,7 @@ if __package__:
     from .expectations import (COUNTS,expected_calls,expected_rejected_creates,
         expected_create_options,expected_rejected_options,expected_options_for_call)
     from .private import VALUE_NAMES,validate_ledger
+    from .mapped_limit import PROOF_CAP, ERROR, validate_proof
 else:
     sys.path.insert(0,str(Path(__file__).resolve().parent))
     from support import fingerprint,json_new
@@ -28,6 +29,7 @@ else:
     from expectations import (COUNTS,expected_calls,expected_rejected_creates,
         expected_create_options,expected_rejected_options,expected_options_for_call)
     from private import VALUE_NAMES,validate_ledger
+    from mapped_limit import PROOF_CAP, ERROR, validate_proof
 from reference.abi import Options,Tile
 
 HERE=Path(__file__).resolve().parent
@@ -214,8 +216,13 @@ def group(directory,library,expected_evals,role,*,inventory=None,rejected_invent
                       'rdg':8*n,'signedrho':8*n,'lambda2':8*n,'flags':n}
             for present,field,width in zip(spec['diagnostics'],('grad','hess'),(24,48)):
                 if present:required[field]=width*n
+            if name=='reject/mapped-object-limit':
+                assert record['error']==ERROR
+                required['preflight-spans']=integer(artifacts['preflight-spans']['bytes'],1,PROOF_CAP)
             sizes(required)
             tile=Tile.from_buffer_copy(blob('tile'))
+            if name=='reject/mapped-object-limit':
+                validate_proof(strict_json(blob('preflight-spans').decode('ascii')),tile)
             assert list(tile.tile_start)==record['tile_start']
             if spec['entry'] or record['status']==0:
                 assert list(tile.tile_count)==record['shape'] and list(tile.input_shape)==record['input_shape']
