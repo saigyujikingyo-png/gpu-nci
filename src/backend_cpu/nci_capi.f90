@@ -1,5 +1,9 @@
 ! SPDX-License-Identifier: MIT
-!> C ABI v1 entry points of the CPU backend (include/nci_api.h).
+!> C ABI v1 entry points (include/nci_api.h), common to nci_cpu and the
+!> optional nci_openacc library.  The build selects nci_acc_backend: the stub
+!> in nci_cpu (NCI_OPENACC stays unavailable), the OpenACC implementation in
+!> nci_openacc (docs/openacc-public-contract.md).  A CPU context never calls
+!> the backend module.
 !>
 !> Every pointer argument arrives as TYPE(C_PTR) by value and is converted
 !> with C_F_POINTER only after its nullability and declared length have been
@@ -14,22 +18,42 @@ module nci_capi
                           PT_ASYMMETRIC, PT_EIGEN_NONCONVERGED, PT_EIGEN_RESIDUAL, &
                           PT_NONFINITE_RESULT
   use nci_kernel
+  use nci_acc_backend, only: ACC_BACKEND_COMPILED, acc_backend_create, acc_backend_destroy, &
+                             acc_backend_begin, acc_backend_plan, acc_backend_evaluate
   implicit none
   private
 
   public :: nci_context_create_v1, nci_eval_tile_f64_v1, nci_context_destroy_v1
+  !> Private test interface (not BIND(C), not exported by the libraries).
+  public :: test_backend_handle
 
   integer(c_int64_t), parameter :: CTX_MAGIC = int(z'4E43495F43505531', c_int64_t)
   integer(c_int64_t), parameter :: ERRBUF_EXTENT = MSG_CAP + 1
 
-  !> Heap context: one validated copy of the options.  Nothing is shared
-  !> between contexts.
-  type, bind(C) :: cpu_context
+  !> Heap context: one validated copy of the options and, for an OpenACC
+  !> context, the handle of its private backend workspace (null otherwise).
+  !> Nothing is shared between contexts.
+  type, bind(C) :: api_context
     integer(c_int64_t) :: magic
     type(nci_options_v1) :: options
-  end type cpu_context
+    type(c_ptr) :: backend
+  end type api_context
 
 contains
+
+  !> Backend workspace handle of a live OpenACC context, otherwise null.
+  !> Reads the context only; no device call.
+  function test_backend_handle(context) result(handle)
+    type(c_ptr), intent(in) :: context
+    type(c_ptr) :: handle
+    type(api_context), pointer :: ctx
+    handle = c_null_ptr
+    if (.not. c_associated(context)) return
+    call c_f_pointer(context, ctx)
+    if (ctx%magic /= CTX_MAGIC) return
+    if (ctx%options%backend /= NCI_OPENACC) return
+    handle = ctx%backend
+  end function test_backend_handle
 
   subroutine write_errbuf(errbuf, errbuf_len, msg)
     type(c_ptr), intent(in) :: errbuf
@@ -63,7 +87,7 @@ contains
     type(c_ptr), pointer :: slot
     type(nci_options_v1), pointer :: optp
     type(nci_options_v1) :: opt
-    type(cpu_context), pointer :: ctx
+    type(api_context), pointer :: ctx
     type(message_t) :: msg
     integer :: ierr
 
@@ -90,16 +114,29 @@ contains
       end if
       call c_f_pointer(options, optp)
       opt = optp
-      call check_options(opt, status, msg)
+      call check_options(opt, status, msg, openacc=ACC_BACKEND_COMPILED)
       if (status /= NCI_OK) exit body
       allocate (ctx, stat=ierr)
       if (ierr /= 0) then
         status = NCI_ALLOCATION_FAILURE
-        call msg_set(msg, 'cannot allocate the CPU context')
+        if (opt%backend == NCI_OPENACC) then
+          call msg_set(msg, 'cannot allocate the OpenACC context')
+        else
+          call msg_set(msg, 'cannot allocate the CPU context')
+        end if
         exit body
       end if
       ctx%magic = CTX_MAGIC
       ctx%options = opt
+      ctx%backend = c_null_ptr
+      if (opt%backend == NCI_OPENACC) then
+        call acc_backend_create(ctx%backend, status, msg)
+        if (status /= NCI_OK) then
+          ctx%magic = 0
+          deallocate (ctx, stat=ierr)
+          exit body
+        end if
+      end if
       slot = c_loc(ctx)
       status = NCI_OK
     end block body
@@ -111,7 +148,7 @@ contains
     type(c_ptr), value :: context, errbuf
     integer(c_size_t), value :: errbuf_len
     integer(c_int) :: status
-    type(cpu_context), pointer :: ctx
+    type(api_context), pointer :: ctx
     type(message_t) :: msg
     integer :: ierr
 
@@ -126,6 +163,13 @@ contains
       if (ctx%magic /= CTX_MAGIC) then
         call msg_set(msg, 'context is not a live CPU context')
         exit body
+      end if
+      if (ctx%options%backend == NCI_OPENACC) then
+        ! A broken workspace stays allocated with this context: status 6.
+        call acc_backend_destroy(ctx%backend, status, msg)
+        if (status /= NCI_OK) exit body
+        ctx%backend = c_null_ptr
+        status = NCI_INVALID_ARGUMENT
       end if
       ctx%magic = 0
       deallocate (ctx, stat=ierr)
@@ -146,7 +190,7 @@ contains
     integer(c_size_t), value :: errbuf_len
     integer(c_int) :: status
 
-    type(cpu_context), pointer :: ctx
+    type(api_context), pointer :: ctx
     type(nci_tile_v1), pointer :: tilep
     type(nci_tile_v1) :: t
     type(nci_options_v1) :: opt
@@ -159,9 +203,10 @@ contains
     type(tile_layout) :: lay
     integer(i64) :: nin, nout, first_bad, n_negative, counts(0:7), p, gpoint
     integer(i64) :: lo(9), ext(9)
-    logical :: diagnostic, write_msg, periodic(3), is_write(9)
+    logical :: diagnostic, write_msg, periodic(3), is_write(9), use_acc
     real(dp) :: m(3, 3)
     integer :: kstatus, pstatus, nrot, i, j, nbuf
+    integer(c_int) :: bstatus
 
     status = NCI_INVALID_ARGUMENT
     if (.not. c_associated(errbuf) .and. errbuf_len /= 0) return
@@ -184,6 +229,13 @@ contains
       end if
       opt = ctx%options
       diagnostic = opt%output_mode == NCI_DIAGNOSTIC
+      use_acc = opt%backend == NCI_OPENACC
+      if (use_acc) then
+        ! Refuses a broken context; otherwise resets its observation.
+        call acc_backend_begin(ctx%backend, status, msg)
+        if (status /= NCI_OK) exit body
+        status = NCI_INVALID_ARGUMENT
+      end if
 
       if (.not. c_associated(tile)) then
         call msg_set(msg, 'tile is NULL')
@@ -272,6 +324,13 @@ contains
         end do
       end do
 
+      if (use_acc) then
+        ! Checked OpenACC workspace plan before rho is dereferenced.
+        call acc_backend_plan(ctx%backend, lay, diagnostic, status, msg)
+        if (status /= NCI_OK) exit body
+        status = NCI_INVALID_ARGUMENT
+      end if
+
       ! Every supplied sample, halo included; nothing outside the input is seen.
       call c_f_pointer(rho, rho_a, [nin])
       call preflight_density(nin, rho_a, opt%negative_tolerance, int(opt%omp_threads), &
@@ -304,13 +363,26 @@ contains
       m = jinv_matrix(t%j_inv)
       periodic = t%periodic /= 0
 
-      call evaluate_grid(lay, periodic, m, rho_a, opt%rho_min, n_negative > 0, diagnostic, &
-                         int(opt%omp_threads), rdg_a, srho_a, lam_a, grad_a, hess_a, flags_a, &
-                         counts, kstatus)
-      if (kstatus /= KERNEL_OK) then
-        status = NCI_ALLOCATION_FAILURE
-        call msg_set(msg, 'cannot allocate neighbour index tables; no output written')
-        exit body
+      if (use_acc) then
+        ! Commits fields/flags only after the downloaded device result passed
+        ! every check; the first failure comes from the downloaded values.
+        call acc_backend_evaluate(ctx%backend, lay, periodic, m, rho_a, opt%rho_min, &
+                                  n_negative > 0, diagnostic, rdg_a, srho_a, lam_a, grad_a, &
+                                  hess_a, flags_a, counts, gpoint, pstatus, nrot, bstatus, msg)
+        if (bstatus /= NCI_OK .and. bstatus /= NCI_INVALID_INPUT &
+            .and. bstatus /= NCI_NUMERIC_FAILURE) then
+          status = bstatus
+          exit body
+        end if
+      else
+        call evaluate_grid(lay, periodic, m, rho_a, opt%rho_min, n_negative > 0, diagnostic, &
+                           int(opt%omp_threads), rdg_a, srho_a, lam_a, grad_a, hess_a, flags_a, &
+                           counts, kstatus)
+        if (kstatus /= KERNEL_OK) then
+          status = NCI_ALLOCATION_FAILURE
+          call msg_set(msg, 'cannot allocate neighbour index tables; no output written')
+          exit body
+        end if
       end if
 
       ! Output points only: halo samples never contribute to the stats.
@@ -322,10 +394,12 @@ contains
 
       if (counts(4) > 0) then
         status = NCI_NUMERIC_FAILURE
-        do p = 1, nout
-          if (btest(int(flags_a(p)), 4)) exit
-        end do
-        call diagnose_point(lay, periodic, m, rho_a, opt%rho_min, p, gpoint, pstatus, nrot)
+        if (.not. use_acc) then
+          do p = 1, nout
+            if (btest(int(flags_a(p)), 4)) exit
+          end do
+          call diagnose_point(lay, periodic, m, rho_a, opt%rho_min, p, gpoint, pstatus, nrot)
+        end if
         call msg_set(msg, 'numeric failure at ')
         call msg_add_int(msg, counts(4))
         call msg_add(msg, ' point(s); first at point ')
@@ -346,6 +420,13 @@ contains
         case default
           call msg_add(msg, ': unclassified')
         end select
+        if (use_acc) then
+          call msg_add(msg, ' (device status ')
+          call msg_add_int(msg, int(pstatus, i64))
+          call msg_add(msg, ', nrot ')
+          call msg_add_int(msg, int(nrot, i64))
+          call msg_add(msg, ')')
+        end if
       else if (counts(7) == 0) then
         status = NCI_INVALID_INPUT
         call msg_set(msg, 'no numerically valid point: every point carries a bit 0-3 flag')

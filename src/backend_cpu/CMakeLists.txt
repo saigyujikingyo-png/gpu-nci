@@ -17,21 +17,33 @@ foreach(_v IN LISTS _nci_flag_vars)
   endif()
 endforeach()
 
+# The common C API is compiled against the OpenACC backend stub here: NCI_OPENACC
+# stays BACKEND_UNAVAILABLE and nothing references the OpenACC runtime. The stub
+# lives beside this directory in the same checkout (docs/openacc-public-contract.md).
+set(_nci_acc_stub "${CMAKE_CURRENT_SOURCE_DIR}/../backend_openacc/nci_acc_backend_stub.f90")
 set(NCI_CPU_SOURCES
   nci_kinds.f90
   nci_abi.f90
   nci_numerics.f90
   nci_validate.f90
   nci_kernel.f90
+  "${_nci_acc_stub}"
   nci_capi.f90)
 
 # Object library shared by the production shared library and white-box tests.
+# Its modules have their own directory, propagated to consumers as an include
+# path, so they never mix with the modules of the optional nci_openacc variant.
 add_library(nci_cpu_objects OBJECT ${NCI_CPU_SOURCES})
+set(_nci_cpu_moddir "${CMAKE_CURRENT_BINARY_DIR}/modules")
+set_target_properties(nci_cpu_objects PROPERTIES Fortran_MODULE_DIRECTORY "${_nci_cpu_moddir}")
+target_include_directories(nci_cpu_objects PUBLIC "$<BUILD_INTERFACE:${_nci_cpu_moddir}>")
 if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
   # Root already sets -ffp-contract=off for Fortran; repeated here so the
   # backend keeps it if the scaffold changes.  -frecursive keeps every local
   # on the stack (re-entrant calls on distinct contexts).
   target_compile_options(nci_cpu_objects PRIVATE -ffp-contract=off -frecursive)
+  # The stub deliberately ignores its inputs.
+  set_source_files_properties("${_nci_acc_stub}" PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
   # Keep the IEEE/no-contraction contract in standalone and external builds;
   # automatic/reentrant locals are needed for distinct concurrent contexts.
@@ -44,6 +56,8 @@ endif()
 add_library(nci_cpu SHARED $<TARGET_OBJECTS:nci_cpu_objects>)
 set_target_properties(nci_cpu PROPERTIES LINKER_LANGUAGE Fortran)
 target_link_libraries(nci_cpu PUBLIC nci_contract)
+# Fortran consumers of the library (the native driver uses nci_abi).
+target_include_directories(nci_cpu INTERFACE "$<BUILD_INTERFACE:${_nci_cpu_moddir}>")
 if(NCI_ENABLE_OPENMP)
   target_link_libraries(nci_cpu PRIVATE OpenMP::OpenMP_Fortran)
 endif()
