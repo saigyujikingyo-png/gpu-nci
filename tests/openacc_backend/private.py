@@ -22,7 +22,7 @@ class Bridge:
         rc=ct.c_int32(-999)
         self.configure_raw(handle,failure,corruption,ct.byref(rc))
         recorder.retain('private-configure',f'configure/{failure}/{corruption}',rc.value,'',
-                        context_token=None if handle is None else handle.value)
+                        failure_at=failure,corruption=corruption,**recorder.context_reference(handle))
         return rc.value
 
     def observe(self, recorder, handle):
@@ -33,7 +33,7 @@ class Bridge:
         rows=np.ctypeslib.as_array(events).reshape(256,6).copy()
         snapshot=dict(values=list(values), events=rows.tolist(), n_events=count.value)
         recorder.retain('private-observe','observe',rc.value,'',observation=snapshot,
-                        context_token=None if handle is None else handle.value)
+                        **recorder.context_reference(handle))
         assert 0 <= count.value <= 256
         assert np.all(rows[count.value:] == 0), 'unused hook events must be zero'
         return rc.value, dict(zip(VALUE_NAMES,values)), rows[:count.value].tolist(), snapshot
@@ -67,6 +67,7 @@ def validate_ledger(values, rows, sizes, expected_status, failure=0):
     host,device,mapped,moved=set(),set(),set(),set()
     peak_h=peak_d=peak_m=0
     uploads=[]; downloads=[]; kernels=0; acquired=[];freed_h=[];freed_d=[]
+    moved_once=set();call_freed=set()
     for seq,row in enumerate(rows,1):
         assert len(row)==6 and all(type(v) is int for v in row)
         number,action,buffer,size,lh,ld=map(int,row)
@@ -105,20 +106,27 @@ def validate_ledger(values, rows, sizes, expected_status, failure=0):
                 freed_d.append(buffer)
             elif action==9:
                 assert buffer in host and buffer not in mapped|device|moved
+                assert expected_status not in (0,3,4) or buffer not in (5,6), 'completed output must move to caller staging'
                 host.remove(buffer)
                 freed_h.append(buffer)
             elif action==10:
                 assert buffer in (5,6) and buffer in host and buffer not in mapped|device|moved
+                assert buffer not in moved_once
                 assert not device|mapped and host <= {5,6}, 'move before precommit cleanup'
-                moved.add(buffer)
+                moved.add(buffer);moved_once.add(buffer)
             elif action==11:
                 assert buffer in moved & host
+                assert buffer not in call_freed
+                assert moved_once=={5,6}, 'both outputs must transfer ownership before call-local release'
                 moved.remove(buffer); host.remove(buffer)
+                call_freed.add(buffer)
         expected_h=sum(sizes[x] for x in host)
         expected_d=sum(sizes[x] for x in device)
         assert lh==expected_h and ld==expected_d
         peak_h=max(peak_h,lh); peak_d=max(peak_d,ld); peak_m=max(peak_m,len(mapped))
     assert not host|device|mapped|moved
+    if expected_status in (0,3,4):
+        assert moved_once==call_freed=={5,6}, 'completed staging transfer/release missing'
     assert values['final_host']==values['final_device']==values['final_maps']==0
     assert (values['peak_host'],values['peak_device'],values['peak_maps'])==(peak_h,peak_d,peak_m)
     assert values['kernels']==kernels

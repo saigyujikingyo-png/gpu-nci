@@ -40,6 +40,12 @@ def assert_unchanged(case, before):
     assert byte_snapshot(case) == before
 
 
+def assert_subtau_uncertain(case,valid):
+    middle=case.lambda2[valid]
+    assert np.all(np.isfinite(middle)) and np.all(middle!=0) and np.all(np.abs(middle)<1e-12)
+    assert np.all(case.flags[valid]&32), 'nonzero abs(lambda2)<tau_abs requires bit 5'
+
+
 def guard_case(case):
     """64-byte canaries around each actual allocation, including rho and stats."""
     guards = []
@@ -77,6 +83,7 @@ class Recorder:
         self.directory = Path(directory)
         self.directory.mkdir()  # exclusive; a consumed directory is never reused
         self.role, self.ordinal, self.evaluations, self.live = role, 0, 0, set()
+        self.context_states = {}
         self.raw = Library(self.path)
         json_new(self.directory / 'library.json', dict(schema_version=1, role=role,
                  library=self.receipt, abi_sizes=[ct.sizeof(x) for x in (Options, Tile, Stats)]))
@@ -102,19 +109,31 @@ class Recorder:
         assert len(self.live) < 2, 'frozen simultaneous-context ceiling'
         handle, error = ct.c_void_p(), ct.create_string_buffer(512)
         before = bytes(opts)
+        context_id=self.ordinal+1
         rc = self.raw.create(ct.byref(opts), ct.byref(handle), error, len(error))
         self.retain('create', case_id, rc, error.value.decode('utf-8'),
-                    dict(options=before, errbuf=error.raw), backend=int(opts.backend),context_token=handle.value)
+                    dict(options=before, errbuf=error.raw), backend=int(opts.backend),
+                    context_token=handle.value,context_id=context_id)
         assert bytes(opts) == before
         assert rc == OK and handle.value, (rc, error.value)
         self.live.add(handle.value)
+        self.context_states[handle.value]=dict(context_id=context_id,eval_ordinal=0,evaluation_record_ordinal=None)
         try:
             yield handle
         finally:
             rc = self.raw.destroy(handle, error, len(error))
-            self.retain('destroy', case_id, rc, error.value.decode('utf-8'), dict(errbuf=error.raw),context_token=handle.value)
+            self.retain('destroy', case_id, rc, error.value.decode('utf-8'), dict(errbuf=error.raw),
+                        **self.context_reference(handle))
             self.live.remove(handle.value)
+            del self.context_states[handle.value]
             assert rc == OK, (rc, error.value)
+
+    def context_reference(self,handle):
+        token=None if handle is None else handle.value
+        state=self.context_states.get(token)
+        return dict(context_token=token,context_id=None if state is None else state['context_id'],
+                    eval_ordinal=0 if state is None else state['eval_ordinal'],
+                    evaluation_record_ordinal=None if state is None else state['evaluation_record_ordinal'])
 
     def run(self, handle, case, case_id, arguments=None):
         assert self.evaluations < MAX_EVALS
@@ -127,6 +146,9 @@ class Recorder:
         for index, value in (arguments or {}).items():
             args[index] = value
         rc = self.raw.evaluate(*args)
+        state=self.context_states[handle.value]
+        state['eval_ordinal']+=1
+        state['evaluation_record_ordinal']=self.ordinal+1
         after = byte_snapshot(case)
         blobs = {'input-rho': before['rho'], 'tile': before['tile'],
                  'stats-before': before['stats'], 'stats-after': after['stats'],
@@ -136,8 +158,11 @@ class Recorder:
                 blobs[name] = after[name]
         self.retain('evaluate', case_id, rc, error.value.decode('utf-8'), blobs,
                     shape=list(case.flags.shape), input_shape=list(case.rho.shape),
-                    tile_start=list(case.tile.tile_start), context_token=handle.value,
+                    tile_start=list(case.tile.tile_start), **self.context_reference(handle),
                     mutations=sorted((arguments or {}).keys()))
+        # Retain the same-object observer immediately, even if later assertions fail.
+        if hasattr(self,'hooks'):
+            self.hooks.observe(self,handle)
         check_guards(case)
         assert before['rho'] == after['rho'], 'caller rho was changed'
         assert before['tile'] == after['tile'], 'caller descriptor was changed'

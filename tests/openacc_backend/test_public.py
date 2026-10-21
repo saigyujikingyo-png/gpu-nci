@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
 
-from .support import guard_case, byte_snapshot, assert_unchanged, FIELDS
+from .support import guard_case, byte_snapshot, assert_unchanged, FIELDS,assert_subtau_uncertain
 from reference.abi import (Evaluation, options, FULL, DIAGNOSTIC, OK, INVALID_ARGUMENT,
                            UNSUPPORTED, INVALID_INPUT, NUMERIC_FAILURE, BACKEND_UNAVAILABLE)
 from reference.fields import quadratic, periodic_fourier, fd4, input_flags
@@ -199,6 +199,7 @@ def test_original_mathematical_edge_cases(public, kind):
             sign = -1 if kind.endswith('negative') else 1
             assert np.all(np.sign(case.lambda2[valid]) == sign)
             assert np.all(np.abs(case.lambda2[valid]) < 1e-12)
+            assert_subtau_uncertain(case,valid)
         if kind.startswith('constant'):
             assert np.all(case.flags[valid] & 32)
 

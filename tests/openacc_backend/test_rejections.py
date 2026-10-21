@@ -25,7 +25,7 @@ def test_invalid_create_is_null_and_errbuf_bounded(public, field, value):
     error = ct.cast(ct.byref(storage,4), ct.POINTER(ct.c_char))
     rc = public.raw.create(ct.byref(opts),ct.byref(handle),error,4)
     public.retain('create-rejected', f'option/{field}/{value}', rc, '',
-                  dict(options=before, errbuf=bytes(storage)))
+                  dict(options=before, errbuf=bytes(storage)),context_token=handle.value)
     assert rc == INVALID_ARGUMENT and handle.value is None
     assert bytes(opts) == before
     assert bytes(storage)[:4] == b'XXXX'
@@ -35,7 +35,8 @@ def test_invalid_create_is_null_and_errbuf_bounded(public, field, value):
 def test_cuda_selector_never_falls_back(public):
     opts, handle, error = options(backend=2), ct.c_void_p(0x1234), ct.create_string_buffer(128)
     rc = public.raw.create(ct.byref(opts), ct.byref(handle), error, len(error))
-    public.retain('create-rejected', 'cuda-unavailable', rc, error.value.decode(), dict(options=bytes(opts)))
+    public.retain('create-rejected', 'cuda-unavailable', rc, error.value.decode(),
+                  dict(options=bytes(opts),errbuf=error.raw),context_token=handle.value)
     assert rc == BACKEND_UNAVAILABLE and handle.value is None
 
 

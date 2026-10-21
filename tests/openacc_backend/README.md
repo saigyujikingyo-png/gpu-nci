@@ -8,6 +8,11 @@ outputs. The public ABI remains 40/280/88 bytes and three C entry points.
 `corpus.json` freezes **148 native pytest cases, 350 Python evaluations and six
 pthread evaluations = 356 total**, at most two simultaneous contexts and actual
 grids at most 17^3. `case_ids.json` freezes every required native pytest ID.
+`expectations.py` independently enumerates every evaluation ID, status, backend,
+mode and actual backing-array shape. Receipt totals are pinned independently:
+524 public records, 260 private records (including 29 configure and 118 observe
+calls), and one CPU-only selector record. These are not accepted from self-reported
+end markers. Automatic private observation adds no field evaluations.
 The complete successful run has 278 GPU field regions: public 238, bridge 34,
 pthread six. One additional optional-library CPU-selector evaluation is a CPU
 reference check. Preflight rejection and allocation injection add no field
@@ -83,12 +88,14 @@ The manually launched controller sets absolute actual paths:
 Then it invokes the native suite exactly once, failure-stop enabled:
 
 ```text
-python -m pytest -q -x -p no:cacheprovider --junitxml=/absolute/new/native.xml tests/openacc_backend/test_cpu_only.py tests/openacc_backend/test_public.py tests/openacc_backend/test_rejections.py tests/openacc_backend/test_private.py
+python -m pytest -q -x --capture=no -p no:cacheprovider --junitxml=/absolute/new/native.xml tests/openacc_backend/test_cpu_only.py tests/openacc_backend/test_public.py tests/openacc_backend/test_rejections.py tests/openacc_backend/test_private.py
 ```
 
 It separately invokes `nci_openacc_test_threads` exactly once with no arguments.
 Its `--describe` entry is an empty-control description that does no runtime or
 device initialization. Raw stdout/stderr and actual exit codes are retained.
+`--capture=no` is required so pytest cannot hide CUDA stderr from passed cases;
+the controller owns the original stdout/stderr logs directly.
 Missing inventory before any candidate attempt is NOT_TESTED; an attempted
 nonzero, timeout, incomplete XML or missing testcase is FAILED. No test skips.
 The receipt root/subdirectories and report files are exclusive; old attempts
@@ -100,6 +107,10 @@ input/descriptor/output/stats/error artifacts. Field data use native binary64
 storage; shapes and layout are recorded. Private observations retain all 24
 values and 256 event columns including unused zeros. A 128 MiB compare-only cap
 covers receipt artifacts; it is not a process RSS/VRAM cap.
+Every private run persists its observer receipt before guard/output assertions
+or returning. Observation records include stable context identity, per-context
+evaluation ordinal and the exact evaluation-record ordinal. Fortran `(6,256)`
+events are serialized as 256 event rows of six integer columns.
 
 Compare-only entry points (never launch a candidate):
 
@@ -108,8 +119,11 @@ python tests/openacc_backend/verify_receipts.py --root /absolute/receipts --juni
 python tests/openacc_backend/verify_threads.py --stdout /absolute/threads.stdout --stderr /absolute/threads.stderr --binary /absolute/nci_openacc_test_threads --library /absolute/libnci_openacc.so --report /absolute/new/thread-check.json
 ```
 
-The first binds mandatory native test IDs, exact evaluation counts and rehashes
-all raw receipts; the second independently checks six thread-result payloads,
+The first binds mandatory native test IDs and independent finite call identities,
+all requested fields and byte sizes, complete context lifecycles and private
+observation schemas/causality, and rehashes all raw receipts. Its PASS means
+complete binding, without mathematical or scientific acceptance. The second
+independently checks six thread-result payloads,
 causal/thread identity events and output hashes. Their PASS scopes are limited
 to those checks. **Neither parses or accepts OpenACC runtime notices.** An
 independent source/compiler/controller/runtime review must bind the original

@@ -15,5 +15,5 @@ def test_cpu_only_openacc_selector_is_unavailable():
     opts,handle,error=options(backend=1),ct.c_void_p(0x1234),ct.create_string_buffer(512)
     status=recorder.raw.create(ct.byref(opts),ct.byref(handle),error,len(error))
     recorder.retain('create-rejected','cpu-only-openacc-selector',status,error.value.decode(),
-                    dict(options=bytes(opts),errbuf=error.raw))
+                    dict(options=bytes(opts),errbuf=error.raw),context_token=handle.value)
     assert status==BACKEND_UNAVAILABLE and handle.value is None
