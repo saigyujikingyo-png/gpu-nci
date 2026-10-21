@@ -3,7 +3,9 @@
 Base: merged M3A `34b387016e57ba4d820d2046ba8c29278f2e5784`.
 This is implementation planning, not a claim that the public GPU backend exists.
 The standalone M3B0 prerequisite has now passed its
-[finite resource checks](openacc-resource-results.md); M3B1 and M3B2 remain unimplemented.
+[finite resource checks](openacc-resource-results.md). M3B1 implementation is in
+progress under the reviewed [public-library contract](openacc-public-contract.md);
+M3B2 remains unimplemented. Neither has native acceptance yet.
 The science in `numerics.md`, ABI v1, CUBE conventions, masks, tolerances and
 canonical X-slab contract remain unchanged.
 
@@ -25,9 +27,10 @@ alias, geometry and density preflight must run before any output changes.
 
 The opaque context owns its backend state. No shared scratch arrays, global
 OpenMP policy changes, process-wide device shutdown or implicit CPU fallback.
-Prefer one optional-GPU library/worker variant to minimize provenance and
-dispatch complexity. Confirm the build/module arrangement after the resource
-gate, keeping compiler variants in separate directories.
+The frozen M3B1 build adds a separate optional `nci_openacc` library alongside
+the default CPU library, with isolated Fortran modules. The optional library
+supports CPU/OpenACC selectors; a consumer links only one library. Worker
+integration remains M3B2.
 
 Reuse the actual production point evaluator with exact source adaptation or
 reviewed device directives, rather than maintaining copied formulas. GPU
@@ -64,7 +67,8 @@ certify all bit-5 threshold cases; bit 6 remains set on valid points.
 After public-path correctness is accepted, freeze independently sourced real
 density inputs, CPU reference settings, GPU settings, finite measurements,
 resource/time caps and stop conditions. A newly created GPT-6.1 Sol execution
-subagent manages each authorized package. Report measured results and error
+subagent prepares each finite package and checks returned receipts; the user
+manually launches it under the latest execution instruction. Report results and error
 only from actual execution. Generate `RESEARCH_HANDOFF.md` after the first
 accepted end-to-end scientific case. No ML, topology or Monte Carlo work is
 included.

@@ -86,22 +86,26 @@ host staging, with device bytes reported separately.
 
 Use explicit-shape array kernel arguments and scalar layout metadata. Every
 point executes the actual production classifier and, when eligible, point_eval.
-Poison staging/status/nrot/marker every call. Every output point, including
+Poison staging every call with FP64 bits `7FF800000000DEAD` (distinct from
+canonical QNAN_BITS `7FF8000000000000`), flags `A5`, status/nrot INT32_MIN,
+and marker -1. Every output point, including
 classified-invalid points, writes `acc_on_device(acc_device_nvidia)` in that
 same GPU region. Classified-invalid status is -1/nrot 0; actual numerical
 status is PT_OK=0 or PT failures 1..6 with nrot in 0..30.
 
 Transfers and completion are synchronous without force-sync environment
 variables. Download and validate every marker, status, nrot, flag and requested
-field. Verify valid fields finite, invalid fields NaN, flags/status consistent,
-and marker 1. Derive integer stats and first failing global point from these
+field. Verify valid fields finite, every invalid field exactly QNAN_BITS,
+no field retains poison, flags/status consistent, and marker 1. This includes
+all nine diagnostic values. Derive integer stats and first failing global point from these
 downloaded values. FULL does not allocate diagnostic outputs.
 
 Before caller commit: unmap/free every device allocation and release host rho,
 tables and metadata. Move remaining packed fields/flags to call-local staging,
 restore the prior concrete device state, then scatter via explicit loops.
 Ownership transfer is not a free: ledger tracks call-owned staging until its
-actual release. A wrapper may observe final totals after backend return.
+actual release. Record event 11 and final zero bytes only after actual cleanup
+has returned; a wrapper may observe final totals after backend return.
 Completed numeric failure (4) and completed all-invalid (3) still commit fields
 and stats exactly as in the existing ABI. No CPU fallback or recomputation.
 
@@ -126,8 +130,13 @@ Fortran module interfaces (not BIND(C)) are frozen for independent test authors:
   c_ptr handle, input int32 failure_at/corruption, output int32 rc.
   failure_at=0 disables; 1..18 fails one real acquisition in documented order
   (host 1..9 then device 1..9). corruption=0 disables, 1 changes a downloaded
-  marker, 2 changes a downloaded point status. Controls are consumed once on
-  the next backend evaluation, never physical OOM or a changed kernel formula.
+  marker at output index 1 to 0, 2 changes downloaded point status at output
+  index 1 to INT32_MIN+1. Both controls nonzero, or an out-of-range value,
+  returns rc=1 without changing controls/observations. Valid configuration
+  replaces pending controls and returns rc=0. A null/non-OpenACC handle returns
+  1; a broken context returns 6. Controls are consumed once when the next
+  backend evaluation enters after all common preflight/plan checks. Preflight
+  rejection does not consume controls. Never physical OOM or changed formulas.
 - `acc_test_observe(handle, values, events, n_events, rc)`: output int64
   values(24), events(6,256); output int32 n_events/rc. No device call.
   Values are schema_version=1, call_ordinal, planned_host, planned_device,
@@ -135,14 +144,25 @@ Fortran module interfaces (not BIND(C)) are frozen for independent test authors:
   acquisition_attempts, backend_status, output_points, kernels, upload_count,
   upload_bytes, download_count, download_bytes, first_failure_global_index,
   first_failure_status, first_failure_nrot, verified_markers, broken, event_count.
-  Absent first failure index is -1. All byte counts include moved live staging.
+  values(3:8), values(16) and values(18) are bytes; other entries are integer
+  counts/statuses/indices/booleans. Absent first failure is index=-1,status=0,
+  nrot=0. backend_status is the equivalent completed public status 0/3/4,
+  or checked failure 5/6. verified_markers counts all downloaded marker==1,
+  independently of the later status/field validation. All byte counts include
+  moved live staging. Initially schema_version=1, first_failure_index=-1 and
+  other values/events zero. observe returns rc=0 for a valid OpenACC context
+  (including a broken one), rc=1 for null/non-OpenACC, with zero outputs on
+  invalid handle. Unused event columns are zero. Observation calls do no I/O.
 - Event columns are sequence, action, buffer_id, bytes, live_host, live_device.
   Actions: host acquire=1, device acquire=2, map=3, upload=4, kernel=5,
   download=6, unmap=7, device free=8, host free=9, move to call=10,
   call-local free=11. Kernel uses buffer_id=0 and bytes=0. Check bounds; never
   truncate a ledger silently. Maps and transfers refer to live owned buffers.
-  Reset observations per evaluation; observations after a preflight-only
-  rejection must not be mistaken for a new device invocation.
+  `events(:,k)` is event k; live_host/live_device are bytes. call_ordinal
+  increases once on backend evaluation entry after successful common preflight
+  and planning, including later allocation failures. At that entry reset other
+  observations. Preflight-only rejections leave the entire previous observation
+  unchanged; tests compare ordinals to distinguish these from new invocations.
 
 Keep fixed hook storage accounted even in the production object. No public
 configuration enables injection. Public shared-library acceptance is required
