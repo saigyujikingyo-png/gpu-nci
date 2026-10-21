@@ -12,12 +12,14 @@
   Difficult independent reviews may use GPT-6 Astra max.
 - A cross-review is read-only: report findings, do not edit the other author's
   checkout and do not invoke the other model recursively.
-- The latest user-supplied execution instructions restore manual launch:
-  agents prepare and review finite packages and perform only necessary light
-  syntax, input, hash and empty-control checks; do not launch scientific or
-  performance calculations. The user closes resource-consuming applications
-  and starts the independent launcher. A GPT-6.1 Sol agent prepares the bounded
-  controller and later checks actual receipts. Preserve input provenance,
+- Execution scope is awaiting clarification: the supplied ChemCUDA rules require
+  manual scientific launch, while earlier GPU-NCI-specific permission allowed
+  a GPT-6.1 Sol agent to manage bounded execution. Until the user resolves this,
+  prepare and review finite packages and perform only necessary light syntax,
+  input, hash and empty-control checks; do not launch native scientific tests
+  or performance calculations. Keep the launcher independent of an agent
+  session. A GPT-6.1 Sol agent prepares the bounded controller and later checks
+  actual receipts. Preserve input provenance,
   limits, stop controls, logs, exit status, failed evidence and acceptance gates.
   Do not kill unrelated processes, expand a frozen run or replay a used package.
 - Never commit credentials, private prompts/replies, personal host metadata,
