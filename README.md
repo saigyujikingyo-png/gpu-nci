@@ -12,7 +12,8 @@ The isolated M3A [OpenACC portability probe passed](docs/openacc-probe-results.m
 54 fixed synthetic records on an RTX 5070 Laptop GPU. The subsequent standalone
 [M3B0 resource gate passed](docs/openacc-resource-results.md) its frozen
 allocation, cleanup and two-instance transport checks on the same GPU model.
-Public GPU dispatch remains unimplemented.
+Public GPU dispatch is being implemented under the reviewed
+[M3B1 contract](docs/openacc-public-contract.md); it has not passed acceptance.
 OpenMP scaling measurements remain unrun.
 See [current status](docs/status.md).
 **No GPU NCI backend, scientific reproduction, or speedup is claimed.**

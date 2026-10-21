@@ -16,7 +16,9 @@ the RTX 5070 Laptop GPU; [results and limits](openacc-probe-results.md) identify
 the exact tested revisions. M3B0's standalone resource gate also passed its
 [finite device checks](openacc-resource-results.md). The next M3 work is public-backend integration:
 checked allocation/cleanup, per-context resources, tile/slab mapping and
-synchronous output commit under the existing ABI. These remain unimplemented.
+synchronous output commit under the existing ABI. M3B1 implementation and
+independent tests are in progress under the reviewed
+[public-library contract](openacc-public-contract.md); native acceptance is pending.
 No scientific or performance package was executed during M3A development.
 
 M3B's finite [resource gate](openacc-resource-contract.md) is accepted; work next
@@ -30,8 +32,8 @@ implement the public GPU backend or establish scientific/performance acceptance.
 3. M2: OpenMP scaling and full-grid/slab equivalence.
 4. M3: OpenACC with explicit actual-device evidence and no CPU fallback, beginning
    with the isolated [M3A numerical portability probe](openacc-probe-contract.md).
-5. M4: finite scientific validation/benchmark package managed by a GPT-6.1 Sol
-   execution subagent under the user's standing authorization.
+5. M4: finite scientific validation/benchmark package prepared and later
+   checked by a GPT-6.1 Sol subagent, manually launched by the user.
 6. Optional CUDA C ABI path only after profiling justifies it.
 
 CPU implementation and independent tests are developed in separate branches.
@@ -59,11 +61,14 @@ Sources:
 - https://docs.nvidia.com/cuda/wsl-user-guide/index.html
 
 Scientific solver runs and performance benchmarks remain separate from these
-synthetic development tests. On 2026-10-21 the user authorized their automatic
-execution for this project: first freeze input provenance, finite stages,
-resource/time limits, logs and stopping conditions, then assign execution to a
-GPT-6.1 Sol subagent. This supersedes the earlier manual-launch requirement;
-it does not change scientific specifications or acceptance thresholds.
+synthetic development tests. The latest user-supplied execution instruction
+restores manual launch, superseding earlier automatic-execution permission.
+Agents prepare and review frozen input provenance, finite stages, resource/time
+limits, logs and stop controls, with necessary light syntax/hash/empty-control
+checks. The user closes resource-consuming applications and launches the
+standalone package. A GPT-6.1 Sol subagent prepares it and later checks actual
+receipts; no automatic next package follows acceptance. Scientific specifications
+and acceptance thresholds remain unchanged.
 Preparation, build, synthetic validation, scientific acceptance and performance
 reporting remain separate states.
 
