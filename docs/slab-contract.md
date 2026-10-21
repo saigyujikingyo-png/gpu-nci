@@ -3,7 +3,8 @@
 This extends supported layouts under the unchanged C ABI v1. It does not change
 the density model, finite differences, Cartesian transforms, eigensolver, masks
 or uncertainty policy. Separate implementation branches passed the finite
-synthetic checks recorded in [status](status.md); their merge is pending. The first
+synthetic checks recorded in [status](status.md), followed by complete-tree checks
+and the approved merge into main. The first
 runtime retains the complete density array; it is not an out-of-core reader.
 
 ## Supported input and output layouts

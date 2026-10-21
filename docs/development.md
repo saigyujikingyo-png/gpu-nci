@@ -6,29 +6,40 @@ with user approval on 2026-10-20. The adapter and offline CLI now pass combined
 synthetic checks under the [frozen integration protocol](cli-contract.md), and
 PRs #4/#5/#6/#7 were merged after approval and integrated-tree verification.
 M2 CPU X-slab code and thread-consistency checks pass combined synthetic
-validation in review branches under the [layout and scheduling contract](slab-contract.md).
-Their merge is pending; OpenMP scaling measurements are NOT_RUN.
+validation under the [layout and scheduling contract](slab-contract.md).
+PRs #9/#10/#11 were integrated into #8, the complete source tree and CI passed,
+and #8 was merged into main with user approval. OpenMP scaling is NOT_RUN.
 See [acceptance status](status.md) for the actual test boundary.
+
+M3A's isolated evaluator now passes its frozen 54-record synthetic corpus on
+the RTX 5070 Laptop GPU; [results and limits](openacc-probe-results.md) identify
+the exact tested revisions. The next M3 work is public-backend integration:
+checked allocation/cleanup, per-context resources, tile/slab mapping and
+synchronous output commit under the existing ABI. These remain unimplemented.
+No scientific or performance package was executed during M3A development.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and
    LAPACK tests, C/Fortran layout checks and negative cases.
 3. M2: OpenMP scaling and full-grid/slab equivalence.
-4. M3: OpenACC with explicit actual-device evidence and no CPU fallback.
-5. M4: finite manually launched scientific validation/benchmark package.
+4. M3: OpenACC with explicit actual-device evidence and no CPU fallback, beginning
+   with the isolated [M3A numerical portability probe](openacc-probe-contract.md).
+5. M4: finite scientific validation/benchmark package managed by a GPT-6.1 Sol
+   execution subagent under the user's standing authorization.
 6. Optional CUDA C ABI path only after profiling justifies it.
 
 CPU implementation and independent tests are developed in separate branches.
-Draft PRs are review artifacts; branch merge requires the user's confirmation.
+Draft PRs are review artifacts. On 2026-10-21 the user gave standing approval
+for routine merges once independent review, integrated-source checks and CI pass.
 The root checkout is the single-writer architecture/integration checkout.
 
 The merged M1 libraries and CLI provide the reader, field evaluation and explicit
 metadata-to-ABI connection. Tiny synthetic end-to-end tests pass in GNU
-Debug/Release and NVHPC CPU Debug. The reviewed M2 branches add full-grid/slab
+Debug/Release and NVHPC CPU Debug. The merged M2 implementation adds full-grid/slab
 equivalence under the same configurations. The implementation preserves source
 declarations, units, Z-fastest order and matrix conventions, without authenticating
 the input's scientific provenance. OpenMP scaling measurements
-still require a bounded manual package; thread consistency tests establish no
+require a bounded Sol-managed package; thread consistency tests establish no
 speedup conclusion.
 
 The original design remains frozen outside this repository. A toolchain
@@ -41,9 +52,14 @@ Sources:
 - https://developer.nvidia.com/hpc-sdk-downloads
 - https://docs.nvidia.com/cuda/wsl-user-guide/index.html
 
-Actual scientific solver runs and performance benchmarks are NOT part of
-agent-driven development tests. Preparation, successful build, synthetic
-validation, scientific acceptance, and performance reporting remain separate.
+Scientific solver runs and performance benchmarks remain separate from these
+synthetic development tests. On 2026-10-21 the user authorized their automatic
+execution for this project: first freeze input provenance, finite stages,
+resource/time limits, logs and stopping conditions, then assign execution to a
+GPT-6.1 Sol subagent. This supersedes the earlier manual-launch requirement;
+it does not change scientific specifications or acceptance thresholds.
+Preparation, build, synthetic validation, scientific acceptance and performance
+reporting remain separate states.
 
 ## Research handoff gate
 

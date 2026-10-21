@@ -7,8 +7,11 @@ Development order: independent CPU validation → OpenMP → OpenACC →
 profile-guided CUDA only if justified. The CPU libraries are merged. The offline
 CPU CLI passed combined synthetic validation in three compiler configurations
 and was merged after independent review and user approval. CPU X-slab support
-now passes combined synthetic validation in separate review branches; those
-branches are not yet merged. OpenMP scaling measurements remain unrun.
+passed combined and complete-tree synthetic validation and is merged in main.
+The isolated M3A [OpenACC portability probe passed](docs/openacc-probe-results.md)
+54 fixed synthetic records on an RTX 5070 Laptop GPU. Public GPU dispatch
+remains unimplemented.
+OpenMP scaling measurements remain unrun.
 See [current status](docs/status.md).
 **No GPU NCI backend, scientific reproduction, or speedup is claimed.**
 

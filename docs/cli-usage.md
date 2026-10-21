@@ -35,7 +35,8 @@ receipt, and per-file hashes, sizes, units, shapes, point/component ordering and
 binary types. It does not authenticate producer claims or certify scientific
 accuracy. Memory reservations cover tracked arrays and allowances, not total RSS.
 Real-density acceptance, scientific uncertainty, GPU fields and performance
-remain governed by the central [status](status.md) and later manual-run gates.
+remain governed by the central [status](status.md) and finite-package acceptance
+gates under the [Sol-managed execution policy](development.md).
 
 Protocol regressions can run independently of a native build:
 

@@ -6,7 +6,8 @@ Status: the CPU backend implements the canonical X slabs of the
 validation of frozen core `4150f34`, runtime `fcbecff3`, tests `30917d3` and
 root `ae80fb9` also passed in GNU Debug/Release and NVHPC CPU Debug: 84 e2e and
 285 oracle passes per configuration, with the one existing public-hook oracle
-skip. See the root integration branch's [status](status.md). Merge is pending.
+skip. Complete-tree GNU validation and CI then passed, and PRs #8--#11 were merged
+with user approval. See [status](status.md).
 There is **no real-density acceptance, no GPU offload
 and no performance measurement**; 1/2/4-thread equality is a consistency check,
 not a scaling result. The header, `nci_abi` types, exported symbols, options,

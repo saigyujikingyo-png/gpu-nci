@@ -52,4 +52,5 @@ unbound metadata, unsupported layouts, insufficient memory and numerical failure
 must fail without a success marker or overwritten source.
 
 These development tests do not run an electronic-structure solver. Real-density
-studies and performance measurements remain separately frozen manual packages.
+studies and performance measurements use separately frozen finite packages
+under the [Sol-managed execution policy](development.md).
