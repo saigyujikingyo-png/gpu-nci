@@ -17,8 +17,10 @@ the exact tested revisions. M3B0's standalone resource gate also passed its
 [finite device checks](openacc-resource-results.md). The next M3 work is public-backend integration:
 checked allocation/cleanup, per-context resources, tile/slab mapping and
 synchronous output commit under the existing ABI. M3B1 implementation and
-independent tests are in progress under the reviewed
-[public-library contract](openacc-public-contract.md); native acceptance is pending.
+independent tests now compile together under the reviewed
+[public-library contract](openacc-public-contract.md). The
+[preparation report](openacc-public-preparation.md) records the exact compiled
+revision and the finite diagnostic step; native acceptance is pending.
 No scientific or performance package was executed during M3A development.
 
 M3B's finite [resource gate](openacc-resource-contract.md) is accepted; work next
