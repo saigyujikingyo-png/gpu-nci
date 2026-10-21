@@ -18,6 +18,11 @@ checked allocation/cleanup, per-context resources, tile/slab mapping and
 synchronous output commit under the existing ABI. These remain unimplemented.
 No scientific or performance package was executed during M3A development.
 
+M3B starts with the finite [resource gate](openacc-resource-contract.md), then
+proceeds to context/field dispatch and CLI/slab integration as set out in the
+[backend plan](openacc-backend-plan.md). The resource gate alone does not
+implement the public GPU backend or establish scientific/performance acceptance.
+
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and
    LAPACK tests, C/Fortran layout checks and negative cases.
