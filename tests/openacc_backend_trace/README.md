@@ -1,6 +1,9 @@
 # M3B1 original NVHPC stderr comparison
 
-**PREPARED; real policy, source sites and compiler metadata are not frozen.**
+The schema-2 policy, exact source/compiler/runtime bindings and complete native
+run were independently reviewed and frozen for the
+[accepted M3B1 finite package](../../docs/openacc-public-results.md).
+Each future run still requires its own reviewed source/build/policy bindings.
 This directory supplies a small standard-library-only, compare-only checker.
 It never invokes a process, Git, a compiler, an evaluator or a shared library,
 and never reads environment variables. No native/GPU/scientific calculation
@@ -43,7 +46,7 @@ characters, duplicate/nonfinite JSON, changed artifacts and exceeded caps.
 It parses at most 16 MiB per JSON/stderr and hashes at most 256 MiB of unique
 artifacts in total. These are artifact caps, not host/device memory limits.
 
-## Prepare once before a manual launch
+## Prepare once before a bounded Sol-managed launch
 
 An independent reviewer must freeze the integrated source, source/compiler
 reports, strict build flags, binaries, test source, upstream verifiers and
@@ -87,7 +90,7 @@ plan; actual verified configure receipts are cross-checked, including pending
 controls surviving preflight and being consumed only on backend entry. The
 checker never infers failure_at from a candidate status or runtime notices.
 
-The fixed manual pytest command must have `--capture=no`, no xdist or order
+The frozen pytest command must have `--capture=no`, no xdist or order
 plugins, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. Its explicit file order is
 `test_cpu_only.py test_public.py test_rejections.py test_private.py`.
 Public and rejections use only the public GPU library; private uses only the

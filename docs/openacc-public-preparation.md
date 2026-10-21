@@ -1,5 +1,11 @@
 # M3B1 preparation status
 
+Historical record for source `a631ca7` and its single-case diagnostic.
+The pending states below describe that preparation checkpoint. A later complete
+run on source `e751417` passed independent acceptance; see the
+[complete finite results](openacc-public-results.md). The original diagnostic
+and failed attempts remain preserved without changing their recorded states.
+
 The optional public OpenACC backend and its independent tests are implemented.
 The complete integrated source at `a631ca78fd22d13b6f07b9e8baf7d6d49e457087`
 was compiled with GNU 13.3 Debug and NVHPC 26.9 Debug. Both configure/build

@@ -1,10 +1,11 @@
 # Optional OpenACC library `nci_openacc` (M3B1)
 
 Contract: [openacc-public-contract.md](../../docs/openacc-public-contract.md).
-Status: **implemented and compile/link-checked only.** No test, library,
-device kernel, benchmark or real-density case has been run from this code:
-GPU offload, test acceptance, scientific acceptance and performance are all
-`NOT_RUN`. The numerical specification, formulas, ABI v1 layouts, statuses,
+Status: **implemented; finite synthetic native validation independently accepted.**
+The [M3B1 results](../../docs/openacc-public-results.md) bind the exact tested
+source and actual GPU evidence. Offline CLI integration, real-density scientific
+acceptance and performance measurements remain pending.
+The numerical specification, formulas, ABI v1 layouts, statuses,
 flags and CPU library behaviour are unchanged.
 
 ## Build

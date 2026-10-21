@@ -1,11 +1,11 @@
 # M3B public OpenACC backend: implementation sequence
 
 Base: merged M3A `34b387016e57ba4d820d2046ba8c29278f2e5784`.
-This is implementation planning, not a claim that the public GPU backend exists.
-The standalone M3B0 prerequisite has now passed its
-[finite resource checks](openacc-resource-results.md). M3B1 implementation is in
-progress under the reviewed [public-library contract](openacc-public-contract.md);
-M3B2 remains unimplemented. Neither has native acceptance yet.
+The standalone M3B0 prerequisite passed its
+[finite resource checks](openacc-resource-results.md). The M3B1 public library
+has now passed [independently accepted finite synthetic validation](openacc-public-results.md)
+under the reviewed [public-library contract](openacc-public-contract.md).
+M3B2 CLI integration is next; it remains unimplemented and unaccepted.
 The science in `numerics.md`, ABI v1, CUBE conventions, masks, tolerances and
 canonical X-slab contract remain unchanged.
 
