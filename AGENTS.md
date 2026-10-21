@@ -12,16 +12,27 @@
   Difficult independent reviews may use GPT-6 Astra max.
 - A cross-review is read-only: report findings, do not edit the other author's
   checkout and do not invoke the other model recursively.
-- Execution scope is awaiting clarification: the supplied ChemCUDA rules require
-  manual scientific launch, while earlier GPU-NCI-specific permission allowed
-  a GPT-6.1 Sol agent to manage bounded execution. Until the user resolves this,
-  prepare and review finite packages and perform only necessary light syntax,
-  input, hash and empty-control checks; do not launch native scientific tests
-  or performance calculations. Keep the launcher independent of an agent
-  session. A GPT-6.1 Sol agent prepares the bounded controller and later checks
-  actual receipts. Preserve input provenance,
-  limits, stop controls, logs, exit status, failed evidence and acceptance gates.
-  Do not kill unrelated processes, expand a frozen run or replay a used package.
+- Standing GPU-NCI execution authorization (user, 2026-10-21): automatically
+  arrange and run scientific calculations, native validation and performance
+  tests through an explicitly GPT-6.1 Sol execution-manager subagent. Manual
+  user launch and repeated routine execution approval are not required. This
+  project-specific instruction supersedes earlier manual-only ChemCUDA rules
+  for GPU-NCI, and remains effective until the user changes or revokes it.
+- Before each run, prepare, independently review and freeze a finite package
+  with provenance, resource/time/output limits, fail-stop/STOP controls, logs,
+  exit status and acceptance criteria. The Sol execution manager checks current
+  capacity and unused attempt identity, launches and monitors it; the root or
+  an independent reviewer accepts actual receipts before progression. Keep the
+  controller independent of an agent session. An old frozen manual-launch label
+  does not require editing the frozen package: record the newer authorization
+  separately and use the reviewed entrypoint without changing its bounds.
+- Further packages within the agreed roadmap may be prepared and automatically
+  run under the same authorization after their own review/readiness gates.
+  Do not expand a live frozen run, extend limits, retry a consumed attempt or
+  weaken a gate. Preserve failures; any corrected attempt needs a new identity
+  and reviewed frozen inputs. Never close unrelated apps or kill their processes.
+- This execution authorization does not change the scientific specification,
+  correctness thresholds, data permissions, merge/CI gates or evidence rules.
 - Never commit credentials, private prompts/replies, personal host metadata,
   environment files, or real input data without explicit public-use provenance.
 - Update ignored `.agents/handoff.md` before handing off modified files.
