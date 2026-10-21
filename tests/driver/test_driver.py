@@ -62,6 +62,12 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         info = json.loads(result.stdout)
         self.assertEqual(info["protocol_version"], 1)
+        legacy_keys = {"protocol_version", "source_revision", "compiler_id", "compiler_version",
+                       "build_type", "fp_policy", "backend_library"}
+        self.assertIn(set(info), (legacy_keys, legacy_keys | {"supported_backends"}))
+        if "supported_backends" in info:
+            self.assertEqual(info["supported_backends"], ["cpu"])
+            self.assertIs(type(info["supported_backends"]), list)
         for key in ("source_revision", "compiler_id", "compiler_version", "build_type", "fp_policy", "backend_library"):
             self.assertIsInstance(info[key], str)
         self.assertTrue(Path(info["backend_library"]).is_absolute())
