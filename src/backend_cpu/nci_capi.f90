@@ -19,7 +19,7 @@ module nci_capi
                           PT_NONFINITE_RESULT
   use nci_kernel
   use nci_acc_backend, only: ACC_BACKEND_COMPILED, acc_backend_create, acc_backend_destroy, &
-                             acc_backend_begin, acc_backend_plan, acc_backend_evaluate
+                             acc_backend_admit, acc_backend_plan, acc_backend_evaluate
   implicit none
   private
 
@@ -165,7 +165,8 @@ contains
         exit body
       end if
       if (ctx%options%backend == NCI_OPENACC) then
-        ! A broken workspace stays allocated with this context: status 6.
+        ! A broken or unreleasable workspace stays allocated with this
+        ! context, which remains a valid broken context: status 6.
         call acc_backend_destroy(ctx%backend, status, msg)
         if (status /= NCI_OK) exit body
         ctx%backend = c_null_ptr
@@ -231,8 +232,9 @@ contains
       diagnostic = opt%output_mode == NCI_DIAGNOSTIC
       use_acc = opt%backend == NCI_OPENACC
       if (use_acc) then
-        ! Refuses a broken context; otherwise resets its observation.
-        call acc_backend_begin(ctx%backend, status, msg)
+        ! Refuses a broken context. Rejections before acc_backend_evaluate
+        ! leave the backend observation and test controls unchanged.
+        call acc_backend_admit(ctx%backend, status, msg)
         if (status /= NCI_OK) exit body
         status = NCI_INVALID_ARGUMENT
       end if
