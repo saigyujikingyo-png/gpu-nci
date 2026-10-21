@@ -97,10 +97,16 @@ contains
     ovf = a > huge(a)/b
   end function mul_overflows
 
-  pure subroutine check_options(o, status, msg)
+  !> openacc (default false) states that this library has the OpenACC
+  !> backend; the order of the checks does not depend on it.
+  pure subroutine check_options(o, status, msg, openacc)
     type(nci_options_v1), intent(in) :: o
     integer(c_int), intent(out) :: status
     type(message_t), intent(inout) :: msg
+    logical, intent(in), optional :: openacc
+    logical :: acc
+    acc = .false.
+    if (present(openacc)) acc = openacc
     status = NCI_INVALID_ARGUMENT
     if (o%abi_version /= NCI_ABI_VERSION) then
       call msg_set(msg, 'options.abi_version must be NCI_ABI_VERSION (1)')
@@ -108,10 +114,14 @@ contains
       call msg_set(msg, 'options.struct_bytes must be sizeof(nci_options_v1) = 40')
     else if (o%reserved /= 0) then
       call msg_set(msg, 'options.reserved must be zero')
-    else if (o%backend == NCI_OPENACC .or. o%backend == NCI_CUDA) then
+    else if (o%backend == NCI_CUDA .or. (o%backend == NCI_OPENACC .and. .not. acc)) then
       status = NCI_BACKEND_UNAVAILABLE
-      call msg_set(msg, 'only the CPU backend is available in this library')
-    else if (o%backend /= NCI_CPU) then
+      if (acc) then
+        call msg_set(msg, 'the CUDA backend is not available in this library')
+      else
+        call msg_set(msg, 'only the CPU backend is available in this library')
+      end if
+    else if (o%backend /= NCI_CPU .and. o%backend /= NCI_OPENACC) then
       call msg_set(msg, 'options.backend is not a known backend')
     else if (o%output_mode /= NCI_FULL .and. o%output_mode /= NCI_DIAGNOSTIC) then
       call msg_set(msg, 'options.output_mode must be NCI_FULL or NCI_DIAGNOSTIC')
