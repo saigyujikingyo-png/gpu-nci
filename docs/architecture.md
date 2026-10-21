@@ -5,8 +5,9 @@ checks and were merged with user approval; see [acceptance status](status.md).
 The offline CLI and native adapter pass combined synthetic checks under the
 [versioned integration protocol](cli-contract.md) and are merged. CPU X-slab
 support follows the [M2 contract](slab-contract.md) and passes combined synthetic
-checks and is merged. An isolated [M3A device portability probe](openacc-probe-contract.md)
-precedes the public GPU backend, which remains unimplemented.
+checks and is merged. The optional [M3B1 public GPU backend](openacc-public-results.md)
+and [M3B2 offline GPU CLI](openacc-cli-results.md) now pass finite synthetic
+validation. Real-density science and performance remain unaccepted.
 
 ```mermaid
 flowchart LR
@@ -15,9 +16,9 @@ flowchart LR
     B --> C
     C --> D[Host buffers and versioned C descriptor]
     D --> E[FP64 CPU and OpenMP]
-    D -. planned .-> F[OpenACC GPU]
+    D --> F[Optional OpenACC GPU]
     E --> G[Fields, flags and statistics]
-    F -. planned .-> G
+    F --> G
     H[Analytic functions and LAPACK oracle] --> I[Independent verifier]
     G --> I
     I --> J[Bounded numerical acceptance report]
@@ -35,6 +36,9 @@ flowchart LR
 - `src/backend_cpu` owns fourth-order derivatives, Cartesian transforms,
   symmetric eigenvalues and output masks. It must neither infer input physics
   nor alter the input density.
+- `src/backend_openacc` owns explicit device resources and synchronous GPU
+  execution of the existing point evaluator. The optional library retains the
+  same C ABI and numerical specification; the CPU build needs no NVIDIA SDK.
 - `reference` and `tests/oracle` own independent expectations. They may read the
   public header but must not import production routines to generate truth.
 - `cli/nci_cli.py` owns strict JSON execution cards, immutable input snapshots,

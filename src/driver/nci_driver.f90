@@ -14,6 +14,12 @@ module nci_driver_support
     integer :: unit(6)=0
     logical :: opened(6)=.false.
   end type
+  type :: openacc_memory_plan
+    ! The reader adds density, atoms and its 8192-byte scanner exactly once.
+    integer(c_int64_t) :: reader_fixed_bytes=0, host_bytes=0, reader_atom_bytes=0
+    integer(c_int64_t) :: device_array_bytes=0, host_fixed_common_bytes=0
+    integer(c_int64_t) :: host_fixed_openacc_bytes=65536, device_static_bytes=288, launch_parameter_bytes=272
+  end type
   interface
     function context_create(options, context, error, length) bind(C,name='nci_context_create_v1') result(rc)
       import :: c_ptr, c_size_t, c_int
@@ -102,7 +108,8 @@ contains
       ',"compiler_id":'//json_string(build_compiler_id())// &
       ',"compiler_version":'//json_string(build_compiler_version())// &
       ',"build_type":'//json_string(build_type())//',"fp_policy":'//json_string(build_fp_policy())// &
-      ',"backend_library":'//json_string(build_backend_library())//'}'
+      ',"backend_library":'//json_string(build_backend_library())// &
+      ',"supported_backends":'//build_supported_backends()//'}'
     if (ios/=0) return
     flush(output_unit,iostat=ios)
     if (ios==0) rc=0
@@ -119,12 +126,13 @@ contains
     supported_representation=.true.
   end function
 
-  subroutine native_receipt(directory,stage,message,complete,abi_status,npoints,stats,stats_ready,ios)
+  subroutine native_receipt(directory,stage,message,complete,abi_status,npoints,stats,stats_ready,backend,plan,ios)
     character(*), intent(in) :: directory,stage,message
     logical, intent(in) :: complete,stats_ready
-    integer, intent(in) :: abi_status
+    integer, intent(in) :: abi_status,backend
     integer(c_int64_t), intent(in) :: npoints
     type(nci_tile_stats_v1), intent(in) :: stats
+    type(openacc_memory_plan), intent(in) :: plan
     integer, intent(out) :: ios
     integer :: unit, close_ios, i
     character(:), allocatable :: text, state, abi
@@ -145,6 +153,15 @@ contains
       text=text//']}'
     else
       text=text//'null'
+    end if
+    if (complete.and.backend==NCI_OPENACC) then
+      text=text//',"backend":"openacc","memory_plan":{"host_bytes":'//decimal(plan%host_bytes)// &
+        ',"reader_atom_bytes":'//decimal(plan%reader_atom_bytes)// &
+        ',"device_array_bytes":'//decimal(plan%device_array_bytes)// &
+        ',"host_fixed_common_bytes":'//decimal(plan%host_fixed_common_bytes)// &
+        ',"host_fixed_openacc_bytes":'//decimal(plan%host_fixed_openacc_bytes)// &
+        ',"device_static_bytes":'//decimal(plan%device_static_bytes)// &
+        ',"launch_parameter_bytes":'//decimal(plan%launch_parameter_bytes)//'}'
     end if
     text=text//'}'
     open(newunit=unit,file=directory//'/native.json',status='new',action='write',iostat=ios)
@@ -258,6 +275,122 @@ contains
     ok=.true.
   end function
 
+  subroutine openacc_tile_bytes(shape,plane,start,width,full_grid,periodic_x,diagnostic,bytes,ok)
+    integer(c_int64_t), intent(in) :: shape(3),plane,start,width
+    logical, intent(in) :: full_grid,periodic_x,diagnostic
+    integer(c_int64_t), intent(out) :: bytes(9)
+    logical, intent(out) :: ok
+    integer(c_int64_t) :: input_width,nin,nout,field_bytes
+    bytes=0; ok=.false.
+    if (full_grid) then
+      input_width=shape(1) ! A full grid has no caller halo, even when periodic.
+    else if (periodic_x) then
+      input_width=checked_sum([width,4_c_int64_t],ok)
+      if (.not.ok) return
+    else
+      input_width=checked_sum([width,min(2_c_int64_t,start), &
+        min(2_c_int64_t,shape(1)-start-width)],ok)
+      if (.not.ok) return
+    end if
+    nin=checked_product([input_width,plane],ok)
+    if (.not.ok) return
+    nout=checked_product([width,plane],ok)
+    if (.not.ok) return
+    bytes(1)=checked_product([8_c_int64_t,nin],ok)
+    if (.not.ok) return
+    bytes(2)=checked_product([40_c_int64_t,width],ok)
+    if (.not.ok) return
+    bytes(3)=checked_product([40_c_int64_t,shape(2)],ok)
+    if (.not.ok) return
+    bytes(4)=checked_product([40_c_int64_t,shape(3)],ok)
+    if (.not.ok) return
+    field_bytes=24
+    if (diagnostic) field_bytes=96
+    bytes(5)=checked_product([field_bytes,nout],ok)
+    if (.not.ok) return
+    bytes(6)=nout
+    bytes(7)=checked_product([4_c_int64_t,nout],ok)
+    if (.not.ok) return
+    bytes(8:9)=bytes(7)
+  end subroutine
+
+  subroutine plan_openacc_memory(shape,periodic_x,layout_mode,bmax,diagnostic,omp_threads,plan,ok,message)
+    integer(c_int64_t), intent(in) :: shape(3),bmax
+    integer, intent(in) :: periodic_x,layout_mode,omp_threads
+    logical, intent(in) :: diagnostic
+    type(openacc_memory_plan), intent(out) :: plan
+    logical, intent(out) :: ok
+    character(:), allocatable, intent(out) :: message
+    integer(c_int64_t) :: starts(4),widths(4),objects(9),plane,global_points,full_tiles,tail,left_halo_tile
+    integer(c_int64_t) :: tile_bytes,retained_width,slab_bytes,output_count,output_bytes,q,thread_bytes,density_bytes
+    integer :: candidates,i
+    plan=openacc_memory_plan(); ok=.false.
+    message='OpenACC reservation arithmetic exceeds int64'
+    plane=checked_product(shape(2:3),ok)
+    if (.not.ok) return
+    global_points=checked_product(shape,ok)
+    if (.not.ok) return
+    starts=0; widths=bmax; candidates=1
+    if (layout_mode==1) then
+      full_tiles=shape(1)/bmax; tail=mod(shape(1),bmax)
+      ! ceil(2/B) is 2 for B=1, otherwise 1; no addition to B can overflow.
+      left_halo_tile=1
+      if (bmax==1) left_halo_tile=2
+      starts(2)=checked_product([min(left_halo_tile,full_tiles-1),bmax],ok)
+      if (.not.ok) return
+      starts(3)=checked_product([full_tiles-1,bmax],ok)
+      if (.not.ok) return
+      candidates=3
+      if (tail/=0) then
+        starts(4)=checked_product([full_tiles,bmax],ok)
+        if (.not.ok) return
+        widths(4)=tail; candidates=4
+      end if
+    end if
+    ! At most four canonical tiles. Only finite-X halo lengths vary among
+    ! full-width tiles; the first complete left halo reaches their maximum.
+    do i=1,candidates
+      if (i>1) then
+        if (any(starts(:i-1)==starts(i))) cycle
+      end if
+      call openacc_tile_bytes(shape,plane,starts(i),widths(i),layout_mode==0,periodic_x==1, &
+        diagnostic,objects,ok)
+      if (.not.ok) return
+      if (any(objects>int(huge(0_c_int32_t),c_int64_t))) then
+        message='OpenACC mapped object exceeds INT32_MAX bytes'; ok=.false.; return
+      end if
+      tile_bytes=checked_sum(objects,ok)
+      if (.not.ok) return
+      plan%device_array_bytes=max(plan%device_array_bytes,tile_bytes)
+    end do
+    slab_bytes=0
+    if (layout_mode==1) then
+      ! Keep the caller allocation B+4, including finite boundary slabs whose
+      ! actual input is shorter. Backend arrays above use the actual input.
+      retained_width=checked_sum([bmax,4_c_int64_t],ok)
+      if (.not.ok) return
+      slab_bytes=checked_product([8_c_int64_t,retained_width,plane],ok)
+      if (.not.ok) return
+    end if
+    output_count=checked_product([bmax,plane],ok)
+    if (.not.ok) return
+    q=25
+    if (diagnostic) q=97
+    output_bytes=checked_product([q,output_count],ok)
+    if (.not.ok) return
+    thread_bytes=checked_product([4096_c_int64_t,int(omp_threads,c_int64_t)],ok)
+    if (.not.ok) return
+    plan%host_fixed_common_bytes=checked_sum([65536_c_int64_t,thread_bytes],ok)
+    if (.not.ok) return
+    plan%reader_fixed_bytes=checked_sum([output_bytes,slab_bytes,plan%device_array_bytes, &
+      plan%host_fixed_common_bytes,plan%host_fixed_openacc_bytes],ok)
+    if (.not.ok) return
+    density_bytes=checked_product([8_c_int64_t,global_points],ok)
+    if (.not.ok) return
+    ! This is the atom-free lower bound until the checked reader returns.
+    plan%host_bytes=checked_sum([density_bytes,8192_c_int64_t,plan%reader_fixed_bytes],ok)
+  end subroutine
+
   subroutine reset_stats(stats)
     type(nci_tile_stats_v1), intent(out) :: stats
     stats%total_points=0; stats%valid_points=0; stats%invalid_points=0
@@ -319,17 +452,19 @@ contains
   subroutine execute_run(input_path,settings_path,directory,exit_status)
     character(*), intent(in) :: input_path,settings_path,directory
     integer, intent(out) :: exit_status
-    integer :: protocol_version, periodic(3), output_mode, omp_threads,layout_mode
+    integer :: protocol_version, periodic(3), output_mode, omp_threads,layout_mode,backend
     integer(int64) :: shape(3), memory_budget_bytes, max_points,slab_planes
     real(c_double) :: origin(3),step_vectors(3,3),rho_min,negative_tolerance
     character(128) :: endpoint_convention(3),quantity,spin_convention,density_representation,length_unit,density_unit
     namelist /nci_run/ protocol_version,shape,origin,step_vectors,periodic,endpoint_convention, &
       quantity,spin_convention,density_representation,length_unit,density_unit,output_mode, &
-      rho_min,negative_tolerance,omp_threads,memory_budget_bytes,max_points,layout_mode,slab_planes
+      rho_min,negative_tolerance,omp_threads,memory_budget_bytes,max_points,layout_mode,slab_planes,backend
     type(cube_grid), target :: grid
     type(cube_read_limits) :: limits
     type(cube_metadata) :: metadata
     type(cube_status) :: reader_status
+    type(cube_atom) :: atom_size_probe
+    type(openacc_memory_plan) :: plan
     type(nci_options_v1), target :: options
     type(nci_tile_v1), target :: tile
     type(nci_tile_stats_v1), target :: stats
@@ -350,7 +485,7 @@ contains
     logical :: complete,stats_ready,arithmetic_ok,computed,continuable
     protocol_version=-1; shape=-1_int64; periodic=-1; output_mode=-1; omp_threads=-1
     memory_budget_bytes=-1_int64; max_points=-1_int64
-    layout_mode=0; slab_planes=0_int64
+    layout_mode=0; slab_planes=0_int64; backend=NCI_CPU
     origin=ieee_value(0.0_c_double,ieee_quiet_nan); step_vectors=origin(1)
     rho_min=origin(1); negative_tolerance=origin(1)
     endpoint_convention=''; quantity=''; spin_convention=''; density_representation=''; length_unit=''; density_unit=''
@@ -380,6 +515,16 @@ contains
       if (ios/=0) then
         message='Invalid namelist: '//trim(io_message); exit body
       end if
+      ! Capability checks precede CUBE input, allocation and context creation.
+      select case(backend)
+      case(NCI_CPU)
+      case(NCI_OPENACC)
+        if (.not.build_has_openacc) then
+          message='Worker does not support the OpenACC backend'; exit body
+        end if
+      case default
+        message='Unsupported worker backend selector'; exit body
+      end select
       if (protocol_version/=1.or.any(shape<5).or.memory_budget_bytes<1.or.max_points<1) exit body
       if (output_mode/=0.and.output_mode/=1) exit body
       if (layout_mode/=0.and.layout_mode/=1) exit body
@@ -441,6 +586,19 @@ contains
         if (.not.arithmetic_ok) exit body
         limits%reserve_bytes_per_point=0; limits%reserve_bytes_per_axis_node=0
       end if
+      if (backend==NCI_OPENACC) then
+        stage='memory'
+        if (any(periodic<0).or.any(periodic>1)) then
+          message='Invalid OpenACC periodic settings'; exit body
+        end if
+        call plan_openacc_memory(shape,periodic(1),layout_mode,bmax,output_mode==1,omp_threads,plan,arithmetic_ok,message)
+        if (.not.arithmetic_ok) exit body
+        if (plan%host_bytes>memory_budget_bytes) then
+          message='OpenACC host reservation exceeds memory budget'; exit body
+        end if
+        limits%reserve_fixed_bytes=plan%reader_fixed_bytes
+        limits%reserve_bytes_per_point=0; limits%reserve_bytes_per_axis_node=0
+      end if
       stage='input'
       call read_cube(input_path,grid,reader_status,limits)
       if (reader_status%code/=CUBE_OK) then
@@ -452,6 +610,13 @@ contains
       stage='geometry'
       if (any(grid%shape/=shape).or.any(grid%origin/=origin).or.any(grid%j/=step_vectors)) then
         message='CUBE geometry differs from parsed binary64 declarations'; exit body
+      end if
+      if (backend==NCI_OPENACC) then
+        stage='memory'; message='OpenACC atom reservation exceeds int64 or memory budget'
+        plan%reader_atom_bytes=checked_product([grid%natoms,int(storage_size(atom_size_probe)/8,c_int64_t)],arithmetic_ok)
+        if (.not.arithmetic_ok) exit body
+        plan%host_bytes=checked_sum([plan%host_bytes,plan%reader_atom_bytes],arithmetic_ok)
+        if (.not.arithmetic_ok.or.plan%host_bytes>memory_budget_bytes) exit body
       end if
       stage='metadata'
       message='Unsupported or missing metadata declaration'
@@ -495,7 +660,7 @@ contains
         grad_ptr=c_loc(grad(1,1)); hess_ptr=c_loc(hess(1,1))
       end if
       options%abi_version=NCI_ABI_VERSION; options%struct_bytes=int(c_sizeof(options),c_int32_t)
-      options%backend=NCI_CPU; options%output_mode=output_mode; options%omp_threads=omp_threads
+      options%backend=int(backend,c_int32_t); options%output_mode=output_mode; options%omp_threads=omp_threads
       options%reserved=0; options%rho_min=rho_min; options%negative_tolerance=negative_tolerance
       tile%abi_version=NCI_ABI_VERSION; tile%struct_bytes=int(c_sizeof(tile),c_int32_t)
       tile%global_n=shape; tile%tile_start=0; tile%tile_count=shape
@@ -622,7 +787,7 @@ contains
         complete=.false.
       end if
     end if
-    call native_receipt(directory,stage,message,complete,abi_status,npoints,total_stats,stats_ready,ios)
+    call native_receipt(directory,stage,message,complete,abi_status,npoints,total_stats,stats_ready,backend,plan,ios)
     if (ios/=0) then
       write(error_unit,'(a)') 'native receipt IO failed; original status: '//stage//': '//message
       complete=.false.

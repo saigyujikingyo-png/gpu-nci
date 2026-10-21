@@ -12,6 +12,25 @@ from fixtures import sha256
 from reference.fields import pack_hessian
 
 
+BUILD_KEYS = {"protocol_version", "source_revision", "compiler_id", "compiler_version",
+              "build_type", "fp_policy", "backend_library"}
+
+
+def check_build_info(build, capabilities=None):
+    """Seven-field legacy CPU metadata remains valid; new arrays are typed."""
+    assert set(build) in (BUILD_KEYS, BUILD_KEYS | {"supported_backends"})
+    assert type(build["protocol_version"]) is int and build["protocol_version"] == 1
+    for key in BUILD_KEYS - {"protocol_version"}:
+        assert isinstance(build[key], str)
+    declared = build.get("supported_backends", ["cpu"])
+    assert type(declared) is list
+    assert declared in (["cpu"], ["cpu", "openacc"])
+    assert all(type(item) is str for item in declared)
+    if capabilities is not None:
+        assert declared == capabilities
+    return declared
+
+
 def invoke(executables, parent, cube, card, output=None):
     cwd = parent / "invocation cwd"
     cwd.mkdir(exist_ok=True)

@@ -3,7 +3,8 @@
 **Accepted on 2026-10-21 for the reviewed finite synthetic scope.** The optional
 library executes the existing FP64 NCI field evaluator on the GPU through the
 unchanged three-function C ABI. This establishes neither real-density scientific
-validation nor a measured speedup. Offline CLI integration remains M3B2.
+validation nor a measured speedup. Offline CLI integration is outside this
+M3B1 result; its later acceptance is recorded in [M3B2 results](openacc-cli-results.md).
 
 The tested source is `e751417074d655f299bdf47911b88b9a7424fc94` (160 tracked
 files). Later documentation commits do not change this tested revision. The

@@ -14,6 +14,7 @@ import sys
 
 MAX_JSON = 1024 * 1024
 INT64_MAX = (1 << 63) - 1
+INT32_MAX = (1 << 31) - 1
 SOURCE_KEYS = {"kind", "reference", "permission", "producer", "producer_version",
                "settings", "density_precision"}
 
@@ -87,14 +88,73 @@ def array(value, length, name):
     return value
 
 
-def checked(value, name):
+def checked(value, name, stage="card"):
     if not 0 <= value <= INT64_MAX:
-        fail("card", f"{name} exceeds signed int64")
+        fail(stage, f"{name} exceeds signed int64")
     return value
+
+
+def openacc_tile_candidates(nx, block):
+    """At most four canonical slab tiles suffice for the workspace maximum."""
+    full, tail = divmod(nx, block)
+    # ceil(2 / block), without adding to a potentially int64-sized block.
+    first_left_halo = 2 // block + int(2 % block != 0)
+    starts = (0, min(first_left_halo, full - 1) * block, (full - 1) * block)
+    tiles = list(dict.fromkeys((start, block) for start in starts))
+    if tail:
+        tiles.append((full * block, tail))
+    return tiles
+
+
+def openacc_memory_plan(card, npoints):
+    """Checked host lower bound and device arrays; native atoms are unknown here.
+
+    These are tracked reservations, not measured RSS or physical VRAM bounds.
+    The reader certifies its compiler-sized atom allocation in native.json.
+    """
+    (nx, ny, nz), comp = card["grid"]["shape"], card["compute"]
+    diagnostic = int(comp["output_mode"] == "diagnostic")
+    plane = checked(ny * nz, "plane size")
+    full_grid = comp["layout"] == "full_grid"
+    block = nx if full_grid else comp["slab_planes"]
+    output_count = npoints if full_grid else checked(block * plane, "slab output extent")
+    caller_slab = 0 if full_grid else checked(
+        checked(checked(block + 4, "halo planes") * plane, "slab input extent") * 8,
+        "slab input allocation")
+    tiles = [(0, nx)] if full_grid else openacc_tile_candidates(nx, block)
+    peak = 0
+    for start, width in tiles:
+        if full_grid:
+            nin = npoints
+        else:
+            halo = 4 if card["metadata"]["periodic"][0] else min(2, start) + min(2, nx - start - width)
+            nin = checked(checked(width + halo, "tile input planes") * plane, "tile input count")
+        nout = checked(width * plane, "tile output count")
+        # Nine distinct mapped objects, each subject to the accepted runtime's byte-count limit.
+        objects = [checked(8 * nin, "mapped density bytes")]
+        objects += [checked(40 * axis, "mapped axis bytes") for axis in (width, ny, nz)]
+        objects += [checked((24 + 72 * diagnostic) * nout, "mapped field bytes"), nout]
+        objects += [checked(4 * nout, "mapped status bytes")] * 3
+        if any(size > INT32_MAX for size in objects):
+            fail("card", "OpenACC mapped object exceeds INT32_MAX bytes")
+        workspace = 0
+        for size in objects:
+            workspace = checked(workspace + size, "OpenACC workspace allocation")
+        peak = max(peak, workspace)
+    common = checked(65536 + checked(4096 * comp["omp_threads"], "host thread storage"), "common host storage")
+    host = checked(8 * npoints, "complete density allocation")
+    for size in (8192, checked((25 + 72 * diagnostic) * output_count, "caller field allocation"),
+                 caller_slab, peak, common, 65536):
+        host = checked(host + size, "OpenACC host reservation")
+    return {"host_bytes": host, "reader_atom_bytes": 0, "device_array_bytes": peak,
+            "host_fixed_common_bytes": common, "host_fixed_openacc_bytes": 65536,
+            "device_static_bytes": 288, "launch_parameter_bytes": 272}
 
 
 def memory_lower_bound(card, npoints):
     """Tracked allocation reservation, excluding only unknown atom storage."""
+    if card["compute"]["backend"] == "openacc":
+        return openacc_memory_plan(card, npoints)["host_bytes"]
     shape, comp = card["grid"]["shape"], card["compute"]
     q = 97 if comp["output_mode"] == "diagnostic" else 25
     if comp["layout"] == "full_grid":
@@ -155,7 +215,7 @@ def validate_card(card):
     if type(comp) is dict and comp.get("layout") == "x_slabs":
         compute_keys.add("slab_planes")
     exact_object(comp, compute_keys, "compute")
-    text_enum(comp["backend"], ("cpu",), "compute.backend")
+    text_enum(comp["backend"], ("cpu", "openacc"), "compute.backend")
     text_enum(comp["layout"], ("full_grid", "x_slabs"), "compute.layout")
     if comp["layout"] == "x_slabs":
         integer(comp["slab_planes"], "compute.slab_planes", 1, grid["shape"][0])
@@ -235,6 +295,8 @@ def namelist(card):
         # MAX_POINTS was the old final assignment; separate it before extension.
         lines[-3] += ","
         lines[-2:-2] = [" layout_mode = 1,", f" slab_planes = {comp['slab_planes']},"]
+    if comp["backend"] == "openacc":
+        lines.insert(2, " backend = 1,")
     return "\n".join(lines).encode("ascii")
 
 
@@ -259,7 +321,7 @@ def child_process(argv, directory, prefix, timeout):
     return result
 
 
-def validate_build(build):
+def validate_build(build, selected_backend="cpu"):
     required = {"protocol_version", "source_revision", "compiler_id", "compiler_version", "build_type", "fp_policy", "backend_library"}
     if type(build) is not dict or not required <= set(build):
         fail("build_info", "Missing required build-info keys")
@@ -269,9 +331,15 @@ def validate_build(build):
             fail("build_info", f"Invalid build-info {key}")
     if not Path(build["backend_library"]).is_absolute():
         fail("build_info", "backend_library must be absolute")
+    supported = build.get("supported_backends", ["cpu"])
+    if (type(supported) is not list or any(type(value) is not str for value in supported) or
+            supported not in (["cpu"], ["cpu", "openacc"])):
+        fail("build_info", "Invalid supported_backends capability array")
+    if selected_backend not in supported:
+        fail("build_info", "Selected backend is not supported by this worker")
 
 
-def validate_native(receipt, npoints):
+def validate_native(receipt, npoints, card=None):
     required = {"protocol_version", "state", "stage", "message", "abi_status", "npoints", "stats"}
     if type(receipt) is not dict or not required <= set(receipt):
         fail("native_receipt", "Missing native receipt keys")
@@ -303,6 +371,24 @@ def validate_native(receipt, npoints):
             receipt["npoints"] != npoints or stats is None or
             stats["total"] != npoints or stats["valid"] == 0 or stats["numeric_failures"] != 0):
         fail("native_receipt", "Native receipt does not certify numerical completion")
+    selected = "cpu" if card is None else card["compute"]["backend"]
+    if selected == "cpu":
+        if receipt.get("backend", "cpu") != "cpu" or "memory_plan" in receipt:
+            fail("native_receipt", "CPU receipt has contradictory backend or GPU memory plan")
+        return
+    if receipt.get("backend") != "openacc":
+        fail("native_receipt", "OpenACC receipt must certify the selected backend")
+    expected = openacc_memory_plan(card, npoints)
+    plan = receipt.get("memory_plan")
+    if type(plan) is not dict or set(plan) != set(expected):
+        fail("native_receipt", "OpenACC memory_plan must contain exactly the required keys")
+    for key, value in plan.items():
+        integer(value, f"memory_plan.{key}", stage="native_receipt")
+    expected["reader_atom_bytes"] = plan["reader_atom_bytes"]
+    expected["host_bytes"] = checked(expected["host_bytes"] + plan["reader_atom_bytes"],
+                                     "host reservation with atoms", "native_receipt")
+    if plan != expected or plan["host_bytes"] > card["limits"]["memory_budget_bytes"]:
+        fail("native_receipt", "OpenACC memory_plan disagrees with the card or exceeds its host budget")
 
 
 def output_specs(card):
@@ -380,7 +466,7 @@ def run(args):
             fail(stage, "Build-info probe failed or timed out")
         build = strict_json(read_small(directory / "build-info.stdout.log", stage), stage)
         manifest["build"] = build
-        validate_build(build)
+        validate_build(build, card["compute"]["backend"])
         backend = Path(build["backend_library"]).resolve(strict=True)
         manifest["binaries"] = {"driver": driver_print, "backend_library": {"path": str(backend), **fingerprint(backend, stage)}}
         stage = "worker"
@@ -398,7 +484,7 @@ def run(args):
         if manifest["worker"]["returncode"] != 0:
             fail(stage, "Worker exited nonzero; inspect native receipt and logs")
         stage = "native_receipt"
-        validate_native(manifest["native"], npoints)
+        validate_native(manifest["native"], npoints, card)
         stage = "outputs"
         for name, width, metadata in output_specs(card):
             info = fingerprint(directory / name, stage)
@@ -445,7 +531,7 @@ def run(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    command = commands.add_parser("run", help="Run a frozen CPU numerical card")
+    command = commands.add_parser("run", help="Run a frozen CPU or OpenACC numerical card")
     command.add_argument("--card", required=True)
     command.add_argument("--driver", required=True)
     command.add_argument("--output-dir", required=True)

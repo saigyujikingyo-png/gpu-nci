@@ -1,4 +1,4 @@
-# Offline CPU CLI
+# Offline density-grid CLI
 
 Run from any working directory, using Python 3.12 and a built native driver:
 
@@ -21,6 +21,31 @@ or retried. Manifest shapes and raw file ordering always describe the global gri
 The complete density is still held in memory: this reduces field-buffer storage,
 and is not an out-of-core reader or a performance claim.
 
+## Optional OpenACC worker
+
+M3B2 GPU selection passed [finite synthetic CLI validation](openacc-cli-results.md).
+The default build and CPU cards continue to use `nci_driver`.
+An optional NVHPC 26.9 build with `NCI_ENABLE_OPENACC=ON` also produces
+`nci_driver_openacc` from the same worker source. Select `compute.backend="openacc"`
+in the card and pass that executable to `--driver`. Both full-grid and X-slab
+layouts use the same CLI command. A CPU-only worker rejects an OpenACC card;
+there is no automatic backend fallback.
+
+The CLI checks the worker's `supported_backends` declaration before evaluation.
+Successful OpenACC receipts include the selected backend and a checked memory
+plan. The plan covers reader storage, host field/staging arrays and fixed
+allowances; device arrays are reported separately. These values do not measure
+process RSS or physical VRAM. Nonzero CUBE atom storage is charged by the worker.
+See the [OpenACC CLI contract](openacc-cli-contract.md) for the exact accounting.
+
+The optional worker embeds its supported runtime library paths. Worker startup
+still removes `LD_LIBRARY_PATH` and `LD_PRELOAD` from the inherited environment.
+Each build probe and evaluation has its own original log files; a backend label
+alone is not evidence of GPU execution. Native validation and measurements use
+the separately reviewed, frozen execution package.
+
+## Results and failure handling
+
 The CLI freezes card bytes and streams a verified input snapshot, writes the
 validated Fortran namelist, obtains native build declarations, fingerprints the
 driver/library, and runs the worker with its declared timeout. Logs, partial
@@ -34,7 +59,7 @@ declarations separately from verified byte fingerprints, the original native
 receipt, and per-file hashes, sizes, units, shapes, point/component ordering and
 binary types. It does not authenticate producer claims or certify scientific
 accuracy. Memory reservations cover tracked arrays and allowances, not total RSS.
-Real-density acceptance, scientific uncertainty, GPU fields and performance
+Real-density acceptance, scientific uncertainty and performance
 remain governed by the central [status](status.md) and finite-package acceptance
 gates under the [Sol-managed execution policy](development.md).
 

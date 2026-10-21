@@ -6,7 +6,7 @@ import subprocess
 import numpy as np
 import pytest
 
-from checks import invoke, json_object, load_and_check_fields
+from checks import check_build_info, invoke, json_object, load_and_check_fields
 from fixtures import fourier_fixture, quadratic_fixture, sha256, write_case
 
 BUILD_KEYS = {"protocol_version", "source_revision", "compiler_id", "compiler_version",
@@ -98,12 +98,8 @@ def test_real_cli_fields_and_final_receipt(executables, tmp_path, make_field, mo
                           capture_output=True, text=True, check=True, timeout=10)
     import json
     build = json.loads(info.stdout)
-    assert set(build) == BUILD_KEYS
-    assert type(build["protocol_version"]) is int
-    assert build["protocol_version"] == 1
+    check_build_info(build, ["cpu"])
     assert manifest["build"] == build
-    for key in BUILD_KEYS - {"protocol_version"}:
-        assert isinstance(build[key], str)
     backend = Path(build["backend_library"])
     assert backend.is_absolute() and backend.is_file()
     assert set(manifest["binaries"]) == {"driver", "backend_library"}
