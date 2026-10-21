@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import numpy as np
 
 OK, INVALID_ARGUMENT, UNSUPPORTED, INVALID_INPUT, NUMERIC_FAILURE = range(5)
+ALLOCATION_FAILURE, BACKEND_UNAVAILABLE = 5, 6
 FULL, DIAGNOSTIC = 0, 1
 DOUBLE_P = ct.POINTER(ct.c_double)
 U8_P = ct.POINTER(ct.c_uint8)
@@ -35,8 +36,8 @@ class Stats(ct.Structure):
     _fields_ += [("bit_counts", ct.c_int64 * 7)]
 
 
-def options(mode=DIAGNOSTIC, rho_min=1e-8, negative_tolerance=0, threads=1):
-    return Options(1, ct.sizeof(Options), 0, mode, threads, 0,
+def options(mode=DIAGNOSTIC, rho_min=1e-8, negative_tolerance=0, threads=1, *, backend=0):
+    return Options(1, ct.sizeof(Options), backend, mode, threads, 0,
                    rho_min, negative_tolerance)
 
 
