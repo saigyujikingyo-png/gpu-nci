@@ -11,6 +11,13 @@ PRs #9/#10/#11 were integrated into #8, the complete source tree and CI passed,
 and #8 was merged into main with user approval. OpenMP scaling is NOT_RUN.
 See [acceptance status](status.md) for the actual test boundary.
 
+M3A's isolated evaluator now passes its frozen 54-record synthetic corpus on
+the RTX 5070 Laptop GPU; [results and limits](openacc-probe-results.md) identify
+the exact tested revisions. The next M3 work is public-backend integration:
+checked allocation/cleanup, per-context resources, tile/slab mapping and
+synchronous output commit under the existing ABI. These remain unimplemented.
+No scientific or performance package was executed during M3A development.
+
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and
    LAPACK tests, C/Fortran layout checks and negative cases.
