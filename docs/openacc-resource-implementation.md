@@ -210,9 +210,17 @@ stdout/stderr. `tools/` holds the scripts that ran them.
   with GNU, a `Release` build type, extra Fortran or linker flags, or
   Ninja Multi-Config fails at configure.
 
+- `commit-1b2ac596aa74a72b4eb927670bb8d0548d907b3a/`: a clean `git archive`
+  export of source commit `1b2ac596aa74a72b4eb927670bb8d0548d907b3a`, built
+  as `attempt-04`. Configure and build exit 0 with no warnings. Neither
+  module object has `.bss`. The binary contains the kernel
+  `m3b_workspace_add_one_582_gpu` with no FMA instruction and no
+  `acc_shutdown` or error-routine symbol. Binary SHA-256:
+  `ed399c2bec56e788fc58ef5f2bb362d7eb8373ddf2fdb9971becd5b4a7a51dca`.
+  Later documentation-only commits do not change these source files.
+
 No candidate, test binary, solver or benchmark was executed and
-`nvidia-smi` was not used. A rebuild of the exact committed tree is recorded
-separately for review.
+`nvidia-smi` was not used.
 
 ## Not established
 
