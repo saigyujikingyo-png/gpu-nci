@@ -3,8 +3,10 @@ import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
 
-from reference.abi import DIAGNOSTIC, FULL
-from slab_cases import extreme_case, slab
+from reference.abi import DIAGNOSTIC, FULL, Evaluation
+from reference.fields import quadratic
+import slab_cases
+from slab_cases import assert_reference, extreme_case, slab
 
 
 @pytest.mark.parametrize("nx,block", [(5, 1), (5, 3), (5, 5), (7, 4)])
@@ -77,3 +79,104 @@ def test_global_byte_limit_fixture_is_safe_in_points_but_overflows_bytes():
     n = x*y*z
     assert 0 < n <= 2**63-1
     assert n*48 > 2**63-1
+
+
+def reference_case(mode, kind):
+    """Invent completed arrays and exact counts without loading any library."""
+    periodic = (kind == "periodic-low",) * 3
+    shape = (0, 5, 5) if kind == "empty" else (5, 5, 5)
+    if kind == "nonempty":
+        rho, grad, hess = quadratic(shape, np.eye(3), np.diag([-.5, -.25, .75]),
+                                    origin=[-2] * 3)
+    else:
+        rho = np.full(shape, 1e-10)
+        grad, hess = np.zeros((*shape, 3)), np.zeros((*shape, 3, 3))
+    case = Evaluation(rho, periodic=periodic, mode=mode)
+    for name in slab_cases.FIELDS[:-1]:
+        field = getattr(case, name)
+        if field is not None:
+            field.fill(np.nan)
+    if kind == "empty":
+        case.flags.fill(0)
+        counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    elif kind == "periodic-low":
+        case.flags.fill(4)
+        counts = [125, 0, 125, 0, 0, 0, 125, 0, 0, 0, 0]
+    else:
+        case.flags.fill(1 if kind == "nonempty" else 5)
+        case.flags[2, 2, 2] = 64 if kind == "nonempty" else 4
+        counts = ([125, 1, 124, 0, 124, 0, 0, 0, 0, 0, 1] if kind == "nonempty"
+                  else [125, 0, 125, 0, 124, 0, 125, 0, 0, 0, 0])
+    if kind == "nonempty":
+        case.rdg[2, 2, 2], case.signedrho[2, 2, 2], case.lambda2[2, 2, 2] = 0, -20, -.25
+        if mode == DIAGNOSTIC:
+            case.grad[2, 2, 2] = 0
+            case.hess[2, 2, 2] = [-.5, -.25, .75, 0, 0, 0]
+    case.stats.total_points, case.stats.valid_points, case.stats.invalid_points, case.stats.numeric_failures = counts[:4]
+    case.stats.bit_counts[:] = counts[4:]
+    return case, rho, grad, hess, periodic
+
+
+@pytest.mark.parametrize("mode", [FULL, DIAGNOSTIC])
+@pytest.mark.parametrize("kind", ["empty", "finite-low", "periodic-low"])
+def test_zero_valid_reference_checks_without_lapack(mode, kind, monkeypatch):
+    def forbidden(*args):
+        pytest.fail("zero valid points must not invoke the eigensolver reference")
+    monkeypatch.setattr(slab_cases, "nci", forbidden)
+    assert_reference(*reference_case(mode, kind))
+
+
+@pytest.mark.parametrize("mode", [FULL, DIAGNOSTIC])
+@pytest.mark.parametrize("bit", [0, 4, 5, 6, 7])
+def test_zero_valid_reference_rejects_wrong_flags(mode, bit):
+    case, *inputs = reference_case(mode, "finite-low")
+    case.flags[2, 2, 2] ^= 1 << bit
+    with pytest.raises(AssertionError):
+        assert_reference(case, *inputs)
+
+
+PRESENT_FIELDS = [(mode, name) for mode in (FULL, DIAGNOSTIC)
+                  for name in ("rdg", "signedrho", "lambda2", "grad", "hess")
+                  if mode == DIAGNOSTIC or name not in ("grad", "hess")]
+
+
+@pytest.mark.parametrize("mode,name", PRESENT_FIELDS)
+def test_zero_valid_reference_rejects_finite_invalid_field(mode, name):
+    case, *inputs = reference_case(mode, "finite-low")
+    getattr(case, name)[2, 2, 2] = 0
+    with pytest.raises(AssertionError):
+        assert_reference(case, *inputs)
+
+
+@pytest.mark.parametrize("mode", [FULL, DIAGNOSTIC])
+@pytest.mark.parametrize("counter", range(11))
+def test_zero_valid_reference_rejects_each_wrong_stat(mode, counter):
+    case, *inputs = reference_case(mode, "periodic-low")
+    if counter < 4:
+        name = ("total_points", "valid_points", "invalid_points", "numeric_failures")[counter]
+        setattr(case.stats, name, getattr(case.stats, name) + 1)
+    else:
+        case.stats.bit_counts[counter - 4] += 1
+    with pytest.raises(AssertionError):
+        assert_reference(case, *inputs)
+
+
+@pytest.mark.parametrize("mode", [FULL, DIAGNOSTIC])
+def test_nonempty_reference_still_calls_lapack(mode, monkeypatch):
+    original = slab_cases.nci
+    calls = []
+    def recorded(rho, grad, hess):
+        calls.append(rho.size)
+        return original(rho, grad, hess)
+    monkeypatch.setattr(slab_cases, "nci", recorded)
+    assert_reference(*reference_case(mode, "nonempty"))
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("mode,name", PRESENT_FIELDS)
+@pytest.mark.parametrize("replacement", [1., np.nan])
+def test_nonempty_reference_rejects_wrong_valid_field(mode, name, replacement):
+    case, *inputs = reference_case(mode, "nonempty")
+    getattr(case, name)[2, 2, 2] = replacement
+    with pytest.raises(AssertionError):
+        assert_reference(case, *inputs)

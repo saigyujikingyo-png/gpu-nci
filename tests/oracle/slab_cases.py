@@ -71,6 +71,9 @@ def assert_reference(case, rho, grad, hess, periodic, rho_min=1e-8):
         if field is not None:
             assert np.all(np.isnan(field[~valid]))
             assert np.all(np.isfinite(field[valid]))
+    assert_stats(case)
+    if not np.any(valid):
+        return
     rdg, signedrho, eigen = nci(rho[valid], grad[valid], hess[valid])
     assert_allclose(case.rdg[valid], rdg, atol=1e-11, rtol=1e-9)
     assert_allclose(case.lambda2[valid], eigen, atol=1e-12, rtol=1e-10)
@@ -80,7 +83,6 @@ def assert_reference(case, rho, grad, hess, periodic, rho_min=1e-8):
     if case.grad is not None:
         assert_allclose(case.grad[valid], grad[valid], atol=1e-12, rtol=1e-10)
         assert_allclose(case.hess[valid], pack_hessian(hess)[valid], atol=1e-12, rtol=1e-10)
-    assert_stats(case)
 
 
 def descriptor_bytes(case):
