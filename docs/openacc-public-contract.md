@@ -188,11 +188,13 @@ convert a GPU skip into acceptance. Bind raw runtime kernel/transfer notices,
 resource events and receipts to actual source/binary; concurrency allows event
 interleaving while preserving each context's causal order.
 
-Current execution instruction: agents perform preparation, compile/static and
-empty-control checks only. A Sol6.1 agent prepares a standalone finite launcher
-with frozen inputs/provenance, limits, stop controls, logs and exit status. The
-user manually launches after closing applications; later actual-output review
-does not authorize another run. No research handoff or speedup claim yet.
+Current execution instruction (2026-10-21): a GPT-6.1 Sol execution-manager
+subagent automatically launches and monitors independently reviewed finite
+packages under [AGENTS.md](../AGENTS.md). Retain the standalone controller,
+frozen inputs/provenance, limits, stop controls, logs, exit status and separate
+receipt acceptance. Further packages need their own readiness gates; no
+same-attempt replay or expansion of a live run. This authorization establishes
+no research result or speedup claim.
 
 References: [NVIDIA 26.9 OpenACC guide](https://docs.nvidia.com/hpc-sdk/archive/26.9/compilers/openacc-gs/index.html),
 [OpenACC 3.0 specification](https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC.3.0.pdf).

@@ -34,8 +34,8 @@ implement the public GPU backend or establish scientific/performance acceptance.
 3. M2: OpenMP scaling and full-grid/slab equivalence.
 4. M3: OpenACC with explicit actual-device evidence and no CPU fallback, beginning
    with the isolated [M3A numerical portability probe](openacc-probe-contract.md).
-5. M4: finite scientific validation/benchmark package prepared and later
-   checked by a GPT-6.1 Sol subagent, manually launched by the user.
+5. M4: finite scientific validation/benchmark packages prepared and executed
+   by a GPT-6.1 Sol subagent, with independent review and receipt acceptance.
 6. Optional CUDA C ABI path only after profiling justifies it.
 
 CPU implementation and independent tests are developed in separate branches.
@@ -63,15 +63,17 @@ Sources:
 - https://docs.nvidia.com/cuda/wsl-user-guide/index.html
 
 Scientific solver runs and performance benchmarks remain separate from these
-synthetic development tests. During the current authoring stage, agents prepare
-and review input provenance, finite stages, resource/time limits, logs and stop
-controls, with compile/static/input/hash/empty-control checks only. Native
-execution is held while the scope of the supplied manual-launch instructions
-is clarified against the earlier GPU-NCI-specific authorization. The launcher
-must work independently of an active agent session. A GPT-6.1 Sol subagent
-prepares it and later checks actual receipts; acceptance does not automatically
-start another package. Scientific specifications and acceptance thresholds
-remain unchanged.
+synthetic development tests. On 2026-10-21 the user authorized automatic GPU-NCI
+calculation scheduling and execution through GPT-6.1 Sol subagents, replacing
+the earlier manual-launch requirement. Before each run, independently review
+and freeze provenance, finite stages, resource/time limits, logs and stop
+controls. The launcher must work independently of an active agent session.
+The Sol execution manager checks capacity, launches and monitors the package;
+root or an independent reviewer accepts actual receipts. Further packages in
+the existing roadmap require their own review/readiness gates. Do not replay
+a consumed attempt or expand a live package. The permanent execution rules
+are in [AGENTS.md](../AGENTS.md); scientific specifications and acceptance
+thresholds remain unchanged.
 Preparation, build, synthetic validation, scientific acceptance and performance
 reporting remain separate states.
 

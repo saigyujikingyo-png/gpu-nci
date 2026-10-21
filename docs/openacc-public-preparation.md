@@ -3,9 +3,9 @@
 The optional public OpenACC backend and its independent tests are implemented.
 The complete integrated source at `a631ca78fd22d13b6f07b9e8baf7d6d49e457087`
 was compiled with GNU 13.3 Debug and NVHPC 26.9 Debug. Both configure/build
-sequences returned zero. **M3B1 native acceptance, scientific validation and
-performance measurements remain NOT_RUN.** These builds do not establish
-correct GPU execution.
+sequences returned zero. **Complete M3B1 acceptance, scientific validation and
+performance measurements remain pending.** These builds alone do not establish
+correct GPU execution. A subsequent single-case diagnostic is recorded below.
 
 ## What was checked
 
@@ -43,8 +43,9 @@ The full runtime-trace policy therefore remains PREPARED. Unknown notifications
 must not be silently ignored, represented as an empty expected list, or fitted
 after execution and used to declare the same execution accepted.
 
-The next finite package is a **user-launched diagnostic capture** of one
-existing test:
+The first finite package is a **Sol6.1-managed diagnostic capture** of one
+existing test, under the standing execution authorization in
+[AGENTS.md](../AGENTS.md):
 
 ```text
 test_public.py::test_original_mathematical_edge_cases[constant-diagnostic]
@@ -62,6 +63,25 @@ A successful diagnostic process only produces
 gate. Unexpected/failed output remains preserved without an automatic retry.
 After source/compiler/runtime evidence explains the observations, an independent
 review must freeze a new policy before a separate complete acceptance run.
+
+## Single-case diagnostic executed on 2026-10-21
+
+A GPT-6.1 Sol execution manager ran that reviewed package once against the
+unchanged compiled source above. Inventory, native case and capture stages
+each exited zero; the JUnit result was one passed test with no failures,
+errors or skips. All 19 public receipt files matched their recorded hashes.
+An independent Sol reviewer checked the original outputs and source assertions:
+105 interior points had the expected flags and zero fields; all 588 boundary
+points had the expected boundary flags and NaN floating fields. The raw runtime
+log contained one GPU kernel launch. The original process identities were gone
+and the owned cgroup had been removed after completion.
+
+The accepted result is **diagnostic capture for policy analysis only**. This
+single constant-density fixture does not establish general GPU correctness,
+complete runtime-trace acceptance, a real-density scientific result or a
+speedup. The complete trace policy still needs independent source/compiler
+justification and freezing before a separate acceptance attempt. The original
+execution records remain unchanged, including their pre-acceptance states.
 
 ## Acceptance still required
 

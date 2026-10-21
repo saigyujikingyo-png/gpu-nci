@@ -66,9 +66,10 @@ certify all bit-5 threshold cases; bit 6 remains set on valid points.
 
 After public-path correctness is accepted, freeze independently sourced real
 density inputs, CPU reference settings, GPU settings, finite measurements,
-resource/time caps and stop conditions. A newly created GPT-6.1 Sol execution
-subagent prepares each finite package and checks returned receipts; the user
-manually launches it under the latest execution instruction. Report results and error
+resource/time caps and stop conditions. A GPT-6.1 Sol execution subagent
+prepares, launches and monitors each independently reviewed finite package
+under the standing authorization in [AGENTS.md](../AGENTS.md). Root or an
+independent reviewer accepts the returned receipts. Report results and error
 only from actual execution. Generate `RESEARCH_HANDOFF.md` after the first
 accepted end-to-end scientific case. No ML, topology or Monte Carlo work is
 included.

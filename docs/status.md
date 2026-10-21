@@ -17,7 +17,7 @@ Updated 2026-10-21 (Europe/London).
 | M3B0 OpenACC resource prerequisite | Finite synthetic PASS | 79 exact values, 240 ownership events, six failure/recovery cases and two live instances; [results](openacc-resource-results.md) |
 | M3B1 public OpenACC library | IN_PROGRESS; design reviewed | [Contract](openacc-public-contract.md); independent implementation/tests in progress; native acceptance NOT_RUN |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
-| Real-density scientific validation | NOT_RUN | Matching source data and a finite Sol-prepared, manually launched package required |
+| Real-density scientific validation | NOT_RUN | Matching source data and an independently reviewed finite package executed by GPT-6.1 Sol required |
 | Performance | NOT_RUN | No speedup claim |
 
 The merged CPU implementation supports complete dense grids and canonical X slabs under
