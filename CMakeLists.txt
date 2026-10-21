@@ -98,6 +98,8 @@ if(BUILD_TESTING AND EXISTS "${NCI_OPENACC_RESOURCE_TEST_DIR}/test_verify.py")
 endif()
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  # Register only pure fixture checks; real CLI/GPU tests remain explicit opt-in.
+  add_subdirectory(tests/openacc_cli "${CMAKE_CURRENT_BINARY_DIR}/openacc_cli_tests")
   add_test(NAME openacc_backend_verifier_selfchecks
     COMMAND "${CMAKE_COMMAND}" -E env "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
       "${Python3_EXECUTABLE}" -m pytest -q -ra -p no:cacheprovider

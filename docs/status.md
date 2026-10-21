@@ -16,7 +16,7 @@ Updated 2026-10-21 (Europe/London).
 | M3A OpenACC numerical portability | Finite synthetic PASS | 36 scalar / 9 RDG / 9 point records; actual NVIDIA kernels and independent verification; [results](openacc-probe-results.md) |
 | M3B0 OpenACC resource prerequisite | Finite synthetic PASS | 79 exact values, 240 ownership events, six failure/recovery cases and two live instances; [results](openacc-resource-results.md) |
 | M3B1 public OpenACC library | Finite synthetic PASS | Source `e751417`; 22 GNU CTests, 1006 CPU pytest passes / one known skip, 148 native passes, 278 GPU kernels; [results](openacc-public-results.md) |
-| M3B2 offline OpenACC CLI | Preparation | Worker selection, host staging reservations and complete CLI/slab validation remain pending |
+| M3B2 offline OpenACC CLI | Implementation under validation | Explicit worker selection and checked host/device reservations are implemented; complete integrated CLI/slab runtime validation remains pending; [contract](openacc-cli-contract.md) |
 | OpenACC SDK and device | Verified for the finite tested scope | NVHPC 26.9 / CUDA 13.3 / cc120 on RTX 5070 Laptop GPU; [M3B1 evidence](openacc-public-results.md) |
 | Real-density scientific validation | NOT_RUN | Matching source data and an independently reviewed finite package executed by GPT-6.1 Sol required |
 | Performance | NOT_RUN | No speedup claim |
