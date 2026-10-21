@@ -13,7 +13,7 @@ Updated 2026-10-21 (Europe/London).
 | Strict CUBE reader | Merged PR #2, synthetic PASS | Reader tests included in all three combined builds; independent and Claude reviews completed |
 | Reader-to-ABI adapter and offline CLI | Merged PR #4/#5/#6/#7, synthetic PASS | Real CLI/worker path: 37 independent tiny end-to-end tests per configuration; no integration skips |
 | CPU X-slab execution | Merged PR #8/#9/#10/#11, combined and complete-tree synthetic PASS | Same ABI and numerics; [M2 contract](slab-contract.md); no scaling measurement |
-| M3A OpenACC numerical portability | Finite synthetic PASS, unmerged branches | 36 scalar / 9 RDG / 9 point records; actual NVIDIA kernels and independent verification; [results](openacc-probe-results.md) |
+| M3A OpenACC numerical portability | Finite synthetic PASS | 36 scalar / 9 RDG / 9 point records; actual NVIDIA kernels and independent verification; [results](openacc-probe-results.md) |
 | OpenACC SDK and device | Smoke PASS | Four FP64 values, actual NVIDIA kernel; NCI GPU backend absent |
 | Real-density scientific validation | NOT_RUN | Matching source data and manual package required |
 | Performance | NOT_RUN | No speedup claim |

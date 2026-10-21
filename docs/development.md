@@ -24,11 +24,13 @@ No scientific or performance package was executed during M3A development.
 3. M2: OpenMP scaling and full-grid/slab equivalence.
 4. M3: OpenACC with explicit actual-device evidence and no CPU fallback, beginning
    with the isolated [M3A numerical portability probe](openacc-probe-contract.md).
-5. M4: finite manually launched scientific validation/benchmark package.
+5. M4: finite scientific validation/benchmark package managed by a GPT-6.1 Sol
+   execution subagent under the user's standing authorization.
 6. Optional CUDA C ABI path only after profiling justifies it.
 
 CPU implementation and independent tests are developed in separate branches.
-Draft PRs are review artifacts; branch merge requires the user's confirmation.
+Draft PRs are review artifacts. On 2026-10-21 the user gave standing approval
+for routine merges once independent review, integrated-source checks and CI pass.
 The root checkout is the single-writer architecture/integration checkout.
 
 The merged M1 libraries and CLI provide the reader, field evaluation and explicit
@@ -50,9 +52,14 @@ Sources:
 - https://developer.nvidia.com/hpc-sdk-downloads
 - https://docs.nvidia.com/cuda/wsl-user-guide/index.html
 
-Actual scientific solver runs and performance benchmarks are NOT part of
-agent-driven development tests. Preparation, successful build, synthetic
-validation, scientific acceptance, and performance reporting remain separate.
+Scientific solver runs and performance benchmarks remain separate from these
+synthetic development tests. On 2026-10-21 the user authorized their automatic
+execution for this project: first freeze input provenance, finite stages,
+resource/time limits, logs and stopping conditions, then assign execution to a
+GPT-6.1 Sol subagent. This supersedes the earlier manual-launch requirement;
+it does not change scientific specifications or acceptance thresholds.
+Preparation, build, synthetic validation, scientific acceptance and performance
+reporting remain separate states.
 
 ## Research handoff gate
 

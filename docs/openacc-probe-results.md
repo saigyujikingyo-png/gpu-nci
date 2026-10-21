@@ -2,7 +2,7 @@
 
 **PASS for the frozen synthetic corpus, 2026-10-21 UTC.** The existing point
 evaluator ran on the actual NVIDIA device and passed the independent gates.
-This is an isolated experiment on unmerged review branches. The public GPU
+This is an isolated experiment. The public GPU
 backend is still `NOT_IMPLEMENTED`; no real-density case, timing benchmark,
 speedup, or scientific sign certification is claimed.
 
