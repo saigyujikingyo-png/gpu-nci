@@ -15,8 +15,9 @@ allocation, cleanup and two-instance transport checks on the same GPU model.
 The optional public OpenACC library passed independently reviewed
 [M3B1 finite synthetic validation](docs/openacc-public-results.md), including
 actual GPU execution, rejection atomicity, cleanup and host-thread migration.
-The M3B2 [offline OpenACC CLI integration](docs/openacc-cli-contract.md) is
-implemented on the development branch; its complete runtime validation is pending.
+The M3B2 [offline OpenACC CLI](docs/openacc-cli-results.md) also passed finite
+synthetic validation for explicit GPU selection, full-grid/X-slab output and
+checked host/device reservations, with no CPU fallback.
 OpenMP scaling measurements remain unrun.
 See [current status](docs/status.md).
 **Real-density scientific validation and speedup measurements remain unrun.**

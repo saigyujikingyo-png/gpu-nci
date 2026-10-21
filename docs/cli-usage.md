@@ -23,8 +23,8 @@ and is not an out-of-core reader or a performance claim.
 
 ## Optional OpenACC worker
 
-M3B2 implements GPU selection; complete integrated runtime acceptance is still
-pending. The default build and CPU cards continue to use `nci_driver`.
+M3B2 GPU selection passed [finite synthetic CLI validation](openacc-cli-results.md).
+The default build and CPU cards continue to use `nci_driver`.
 An optional NVHPC 26.9 build with `NCI_ENABLE_OPENACC=ON` also produces
 `nci_driver_openacc` from the same worker source. Select `compute.backend="openacc"`
 in the card and pass that executable to `--driver`. Both full-grid and X-slab
@@ -59,7 +59,7 @@ declarations separately from verified byte fingerprints, the original native
 receipt, and per-file hashes, sizes, units, shapes, point/component ordering and
 binary types. It does not authenticate producer claims or certify scientific
 accuracy. Memory reservations cover tracked arrays and allowances, not total RSS.
-Real-density acceptance, scientific uncertainty, GPU fields and performance
+Real-density acceptance, scientific uncertainty and performance
 remain governed by the central [status](status.md) and finite-package acceptance
 gates under the [Sol-managed execution policy](development.md).
 

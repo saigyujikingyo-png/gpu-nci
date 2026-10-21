@@ -22,9 +22,16 @@ defines the accepted scope. The [historical preparation report](openacc-public-p
 preserves the earlier build and single-case diagnostic evidence.
 No scientific or performance package was executed during M3A development.
 
-Work next proceeds to M3B2 CLI/slab integration as set out in the
-[backend plan](openacc-backend-plan.md). Library synthetic acceptance does not
-establish CLI, real-density scientific or performance acceptance.
+M3B2 now passes [finite CLI/slab integration validation](openacc-cli-results.md),
+including explicit GPU selection, checked memory plans and original runtime
+trace attribution. Its first failed attempt and the minimal runtime-link repair
+are recorded separately from the accepted run.
+
+Work next proceeds to M4 as set out in the [backend plan](openacc-backend-plan.md):
+prepare a public stored-wavefunction case, an independent CPU density/derivative
+reference, and fixed grid-convergence and input-precision checks. Each finite
+package needs independent review, freeze, Sol-managed execution and acceptance.
+Scientific and performance acceptance remain pending.
 
 1. M0: build isolation, ABI, public-source boundaries, independent worktrees.
 2. M1: Fortran input parser and FP64 CPU fields; independent analytic and

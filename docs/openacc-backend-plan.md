@@ -5,7 +5,8 @@ The standalone M3B0 prerequisite passed its
 [finite resource checks](openacc-resource-results.md). The M3B1 public library
 has now passed [independently accepted finite synthetic validation](openacc-public-results.md)
 under the reviewed [public-library contract](openacc-public-contract.md).
-M3B2 CLI integration is next; it remains unimplemented and unaccepted.
+M3B2 CLI integration has also passed [finite synthetic validation](openacc-cli-results.md).
+Next is the separately reviewed M4 real-density and performance work.
 The science in `numerics.md`, ABI v1, CUBE conventions, masks, tolerances and
 canonical X-slab contract remain unchanged.
 
@@ -29,8 +30,8 @@ The opaque context owns its backend state. No shared scratch arrays, global
 OpenMP policy changes, process-wide device shutdown or implicit CPU fallback.
 The frozen M3B1 build adds a separate optional `nci_openacc` library alongside
 the default CPU library, with isolated Fortran modules. The optional library
-supports CPU/OpenACC selectors; a consumer links only one library. Worker
-integration remains M3B2.
+supports CPU/OpenACC selectors; a consumer links only one library. The M3B2
+optional worker links this library with the GPU OpenACC runtime explicitly.
 
 Reuse the actual production point evaluator with exact source adaptation or
 reviewed device directives, rather than maintaining copied formulas. GPU

@@ -8,7 +8,7 @@ not execute a worker or load a candidate library. Explicit file/nodeid selection
 also requires the option before atom metadata or native paths are inspected.
 
 The local CMake file registers only `test_pure.py` (32 cases), with plugin
-autoload/cache disabled and a 120-second timeout. Root integration must add its
+autoload/cache disabled and a 120-second timeout. Root CMake includes this
 subdirectory; no native test is registered with CTest.
 
 The finite execution package must additionally provide `NCI_CUBE_ATOM_BYTES`,
