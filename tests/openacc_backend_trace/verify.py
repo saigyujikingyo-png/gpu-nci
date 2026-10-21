@@ -10,9 +10,17 @@ import sys
 
 CAP = 16 * 1024 * 1024
 TOTAL_CAP = 256 * 1024 * 1024
+CONSTRUCTS = ('update', 'enter_data', 'compute', 'exit_data')
+TRANSFER_KINDS = ('upload', 'download', 'alloc', 'delete', 'free')
+NOTICE_KINDS = TRANSFER_KINDS + ('launch', 'wait') + tuple(
+    direction + '_' + construct for direction in ('enter', 'leave') for construct in CONSTRUCTS)
+FAILURE_PLAN = {**{f'fail-{n}': n for n in range(1, 19)},
+                'control/pending-failure-consumed': 1, 'isolation/A-failure': 9}
 SCOPE = ('Raw runtime notice comparison only; upstream receipt checks and trusted '
          'controller provenance are prerequisites. No scientific or performance acceptance; '
-         'pthread notices are aggregate counts/byte multisets, not Linux-thread attribution.')
+         'pthread notices are aggregate counts/byte multisets, not Linux-thread attribution. '
+         'Physical alloc/free bytes and addresses are observations only, not allocator, '
+         'private-buffer ownership, net balance or VRAM acceptance.')
 
 
 class Rejected(ValueError):
@@ -97,21 +105,35 @@ def plan_rows(plan, prepared):
         need(type(rows) is list and rows, 'input plan list required')
         seen, active = set(), 0
         for row in rows:
-            keys(row, ('case_id', 'mode', 'backend', 'shape', 'input_shape', 'status', 'entry'), 'planned call')
+            keys(row, ('case_id', 'mode', 'backend', 'shape', 'input_shape', 'status', 'entry', 'failure_at'), 'planned call')
             need(type(row['case_id']) is str and row['case_id'] and row['case_id'] not in seen, 'duplicate/empty case')
             seen.add(row['case_id'])
             integer(row['mode'], 0, 1); integer(row['backend'], 0, 1); integer(row['status'], 0, 6)
             shape(row['shape']); shape(row['input_shape'])
             need(type(row['entry']) is bool, 'entry boolean required')
+            integer(row['failure_at'], 0, 18)
+            need((row['failure_at'] > 0) == (row['status'] == 5), 'failure injection/status plan mismatch')
+            if row['failure_at']:
+                need(group == 'private' and row['entry'] and row['backend'] == 1, 'failure injection outside bridge entry')
+            if not prepared:
+                need(row['failure_at'] == (FAILURE_PLAN.get(row['case_id'], 0) if group == 'private' else 0), 'failure_at differs from independent configure plan')
             if row['entry'] and row['backend'] == 1:
                 need(row['status'] in (0, 3, 4, 5, 6), 'unexpected backend-entry status')
             active += field_region(row)
         if not prepared:
             need(len(rows) == total and active == regions, 'finite input inventory/count mismatch')
+            if group=='private':
+                need({r['case_id'] for r in rows if r['failure_at']} == set(FAILURE_PLAN), 'finite configure-plan cases missing/extra')
 
 
 def field_region(row):
-    return row['backend'] == 1 and row['entry'] and row['status'] != 5
+    return row['backend'] == 1 and row['entry'] and row['failure_at'] == 0
+
+
+def device_acquisitions(row):
+    if row['backend'] != 1 or not row['entry']:
+        return 0
+    return 9 if row['failure_at'] == 0 else max(row['failure_at'] - 10, 0)
 
 
 def buffers(row):
@@ -128,7 +150,7 @@ def policy_check(policy, checked):
     need(policy['state'] in ('PREPARED', 'FROZEN'), 'policy state')
     prepared = policy['state'] != 'FROZEN'
     evidence = policy['evidence']
-    keys(evidence, ('source', 'compiler_report', 'build_manifest', 'input_plan_source',
+    keys(evidence, ('source', 'compiler_report', 'build_manifest', 'input_plan_source', 'control_plan_source',
                     'receipt_verifier', 'thread_verifier', 'trace_verifier', 'controller',
                     'library', 'bridge', 'thread_binary', 'corpus', 'case_ids'), 'policy evidence')
     for item in evidence.values():
@@ -143,11 +165,11 @@ def policy_check(policy, checked):
     for name, site in sites.items():
         need(type(name) is str and name, 'site name')
         keys(site, ('kind', 'fields', 'proof'), 'site')
-        need(site['kind'] in ('upload', 'download', 'launch'), 'site kind')
+        need(site['kind'] in NOTICE_KINDS, 'site kind')
         need(type(site['proof']) is str and site['proof'].strip(), 'source/report site proof required')
         fields = site['fields']
         need(type(fields) is dict and {'file', 'function', 'line'} <= set(fields), 'site/source fields required')
-        need(not {'device', 'threadid', 'bytes'} & set(fields), 'reserved site fields')
+        need(not {'device', 'threadid', 'bytes', 'devaddr'} & set(fields), 'reserved site fields')
         for key, value in fields.items():
             need(re.fullmatch('[a-z_][a-z0-9_]*', key), 'invalid notification key')
             if value is None:
@@ -155,6 +177,9 @@ def policy_check(policy, checked):
             else:
                 need(type(value) is str and value and '\n' not in value and '\r' not in value and '\x00' not in value, 'fixed field value required')
         need(re.fullmatch('[1-9][0-9]*', fields['line'] or ''), 'positive source line required')
+        if site['kind'] in ('alloc', 'delete'):
+            need(fields == dict(file='(OpenACC API)', function='acc_malloc' if site['kind']=='alloc' else 'acc_free', line='1'), 'known allocation API fields required')
+    need(sum(site['kind']=='delete' for site in sites.values()) == 1, 'exactly one logical acc_free delete site required')
     explicit = policy['explicit']
     keys(explicit, ('upload', 'launch', 'download'), 'explicit sites')
     need(type(explicit['upload']) is list and len(explicit['upload']) == 9, 'nine upload sites')
@@ -167,8 +192,9 @@ def policy_check(policy, checked):
     need(type(metadata) is list, 'metadata list required, empty only after source/report review')
     for item in metadata:
         keys(item, ('gap', 'site', 'bytes', 'proof'), 'metadata')
-        integer(item['gap'], 0, 15); integer(item['bytes'], 1, (1 << 31) - 1)
-        need(item['site'] in sites and sites[item['site']]['kind'] != 'launch', 'metadata transfer site')
+        integer(item['gap'], 0, 15); integer(item['bytes'], 0, (1 << 31) - 1)
+        need(item['site'] in sites and sites[item['site']]['kind'] not in ('launch','alloc','delete','free'), 'metadata/construct site')
+        need((item['bytes'] > 0) == (sites[item['site']]['kind'] in ('upload','download')), 'metadata/construct byte shape')
         need(type(item['proof']) is str and item['proof'].strip(), 'metadata source/report proof required')
     keys(policy['process_notices'], ('python', 'pthread'), 'process notices')
     for stream in ('python', 'pthread'):
@@ -177,21 +203,44 @@ def policy_check(policy, checked):
             need(type(rows) is list, 'process notice list')
             for item in rows:
                 keys(item, ('site', 'bytes', 'proof'), 'process notice')
-                need(item['site'] in sites and sites[item['site']]['kind'] != 'launch', 'process transfer site')
-                integer(item['bytes'], 1, (1 << 31) - 1)
+                need(item['site'] in sites and sites[item['site']]['kind'] not in ('launch','alloc','delete','free'), 'process notice site')
+                integer(item['bytes'], 0, (1 << 31) - 1)
+                need((item['bytes'] > 0) == (sites[item['site']]['kind'] in ('upload','download')), 'process notice bytes')
                 need(type(item['proof']) is str and item['proof'].strip(), 'process notice proof')
     return plan, prepared
 
 
-def parse_notices(raw, sites):
+def payload(line):
+    """NVHPC uses padded horizontal whitespace and positional Leave locations."""
+    match = re.fullmatch(r'(upload|download|alloc|delete|free)[ \t]+CUDA[ \t]+data[ \t]+(.+)', line)
+    if match:
+        return match[1], match[2]
+    match = re.fullmatch(r'launch[ \t]+CUDA[ \t]+kernel[ \t]+(.+)', line)
+    if match:
+        return 'launch', match[1]
+    match = re.fullmatch(r'Implicit[ \t]+wait[ \t]+(.+)', line)
+    if match:
+        return 'wait', match[1]
+    match = re.fullmatch(r'Enter[ \t]+(update[ \t]+construct|enter[ \t]+data[ \t]+construct|compute[ \t]+region|exit[ \t]+data[ \t]+construct)[ \t]+(.+)', line)
+    if match:
+        construct = '_'.join(match[1].split()[:-1])
+        return 'enter_' + construct, match[2]
+    match = re.fullmatch(r'Leave[ \t]+(update|enter[ \t]+data|compute|exit[ \t]+data)[ \t]+(.+)', line)
+    if match:
+        location = re.fullmatch(r'(.+)[ \t]+([^ \t:]+):([1-9][0-9]*)[ \t]+(.+)', match[2])
+        need(location is not None, 'Leave source location grammar')
+        return 'leave_' + '_'.join(match[1].split()), (
+            f'file={location[1]} function={location[2]} line={location[3]} ' + location[4])
+    raise Rejected('unknown runtime notification')
+
+
+def parse_notice_rows(raw, sites):
     """One full line per notification; reject every unrecognised line/key/site."""
     result = []
     for line in utf8(raw).splitlines():
         need(line and line == line.strip(), 'blank/partial runtime notification')
-        match = re.fullmatch(r'(upload|download) CUDA data (.+)|launch CUDA kernel (.+)', line)
-        need(match is not None, 'unknown runtime notification')
-        kind = match[1] or 'launch'; tail = match[2] or match[3]
-        tokens = list(re.finditer(r'(?:^| )([a-z_][a-z0-9_]*)=', tail))
+        kind, tail = payload(line)
+        tokens = list(re.finditer(r'(?:^|[ \t]+)([a-z_][a-z0-9_]*)=', tail))
         need(tokens and tokens[0].start() == 0, 'notification key/value grammar')
         fields = {}
         for index, token in enumerate(tokens):
@@ -203,11 +252,18 @@ def parse_notices(raw, sites):
         tid = fields.pop('threadid', None)
         need(tid is not None and re.fullmatch(r'0|[1-9][0-9]*', tid), 'canonical runtime threadid required')
         size = fields.pop('bytes', None)
-        if kind == 'launch':
-            need(size is None, 'kernel must not carry transfer bytes'); size = 0
+        address = fields.pop('devaddr', None)
+        if kind in ('alloc', 'delete', 'free'):
+            need(address is not None and re.fullmatch(r'0x[0-9a-fA-F]+', address) and 0 < int(address,16) <= (1 << 64)-1, 'nonzero 64-bit device address required')
         else:
+            need(address is None, 'unexpected device address')
+        if kind in TRANSFER_KINDS:
             need(size is not None and re.fullmatch('[1-9][0-9]*', size), 'canonical transfer byte count required')
-            size = integer(int(size), 1, (1 << 31) - 1)
+            size = integer(int(size), 1)
+            if kind in ('upload', 'download'):
+                integer(size, 1, (1 << 31)-1)
+        else:
+            need(size is None, 'non-transfer notice must not carry bytes'); size = 0
         candidates = []
         for name, site in sites.items():
             if site['kind'] != kind or set(fields) != set(site['fields']):
@@ -225,20 +281,27 @@ def parse_notices(raw, sites):
             if good:
                 candidates.append(name)
         need(len(candidates) == 1, 'unknown/ambiguous runtime function, file, site or metadata')
-        result.append((candidates[0], size))
+        result.append(dict(site=candidates[0], kind=kind, bytes=size, devaddr=address, threadid=tid))
     return result
 
 
+def parse_notices(raw, sites):
+    return [(row['site'], row['bytes']) for row in parse_notice_rows(raw, sites)]
+
+
 def call_events(row, policy):
-    if not field_region(row):
-        return []
-    sizes = buffers(row); explicit = policy['explicit']
-    base = list(zip(explicit['upload'], sizes)) + [(explicit['launch'], 0)] + list(zip(explicit['download'], sizes[4:]))
     result = []
-    for gap in range(16):
-        result.extend((item['site'], item['bytes']) for item in policy['metadata'] if item['gap'] == gap)
-        if gap < 15:
-            result.append(base[gap])
+    if field_region(row):
+        sizes = buffers(row); explicit = policy['explicit']
+        base = list(zip(explicit['upload'], sizes)) + [(explicit['launch'], 0)] + list(zip(explicit['download'], sizes[4:]))
+        for gap in range(16):
+            result.extend((item['site'], item['bytes']) for item in policy['metadata'] if item['gap'] == gap)
+            if gap < 15:
+                result.append(base[gap])
+    delete_site = next(name for name,site in policy['sites'].items() if site['kind']=='delete')
+    # Source-reviewed logical cleanup count. Raw pooled bytes/address do not
+    # identify a private array and are deliberately not substituted here.
+    result.extend([(delete_site, 0)] * device_acquisitions(row))
     return result
 
 
@@ -247,7 +310,8 @@ def process_events(policy, stream, position):
 
 
 def compare(raw, rows, policy, stream):
-    actual = parse_notices(raw, policy['sites'])
+    parsed = parse_notice_rows(raw, policy['sites'])
+    actual = [(r['site'], 0 if r['kind']=='delete' else r['bytes']) for r in parsed if r['kind'] not in ('alloc','free')]
     expected = process_events(policy, stream, 'prefix')
     for row in rows:
         expected.extend(call_events(row, policy))
@@ -256,8 +320,12 @@ def compare(raw, rows, policy, stream):
         need(actual == expected, 'serial runtime site/byte sequence differs from verified input order')
     else:
         need(Counter(actual) == Counter(expected), 'pthread runtime aggregate site/count/byte multiset mismatch')
-    counts = Counter(policy['sites'][name]['kind'] for name, _ in actual)
-    return dict(notices=len(actual), kinds=dict(counts),
+    counts = Counter(r['kind'] for r in parsed)
+    observed = {kind:dict(count=sum(r['kind']==kind for r in parsed),
+        bytes=sum(r['bytes'] for r in parsed if r['kind']==kind),
+        addresses=sorted({r['devaddr'] for r in parsed if r['kind']==kind})) for kind in ('alloc','delete','free')}
+    return dict(notices=len(parsed), kinds=dict(counts), runtime_api_observations=observed,
+                logical_delete_phase='serial cleanup per planned call' if stream=='python' else 'aggregate only',
                 upload_bytes=sum(n for name, n in actual if policy['sites'][name]['kind'] == 'upload'),
                 download_bytes=sum(n for name, n in actual if policy['sites'][name]['kind'] == 'download'))
 
@@ -291,11 +359,29 @@ def bind_python(plan, paths, policy, checked):
                     records.append(record)
         records.sort(key=lambda row: integer(row['ordinal'], 1))
         need(len(records) == len(wanted), 'upstream evaluated inventory missing/extra')
+        actual_failures, pending = {}, {}
+        if group == 'private':
+            for ordinal,record in sorted(json_records.items()):
+                cid = record.get('context_id')
+                if record['kind']=='create':
+                    pending[ordinal]=0
+                elif record['kind']=='private-configure' and record['status']==0:
+                    need(cid in pending, 'configure context missing')
+                    pending[cid]=record['failure_at']
+                elif record['kind']=='evaluate':
+                    need(record['case_id'] in wanted, 'unknown evaluated case')
+                    if wanted[record['case_id']]['entry']:
+                        need(cid in pending, 'evaluation context missing')
+                        actual_failures[ordinal]=pending[cid]
+                        pending[cid]=0
+                    else:
+                        actual_failures[ordinal]=0
         seen = set()
         for record in records:
             name = record['case_id']
             need(name in wanted and name not in seen, 'unplanned/duplicate verified case')
             seen.add(name); spec = wanted[name]
+            need(spec['failure_at'] == (actual_failures[record['ordinal']] if group=='private' else 0), 'independent failure_at plan differs from verified configure receipts')
             need(record['library'] == library, 'verified evaluation binary differs from policy')
             for key in ('status', 'shape', 'input_shape'):
                 need(record[key] == spec[key], 'verified evaluation differs from frozen input plan')
@@ -355,7 +441,7 @@ def verify(policy_path, policy_sha256, bundle_path):
     identities = {('concurrent', j, r) for j in (0, 1) for r in (0, 1)} | {
         ('migration-new-thread', 0, 0), ('migration-main-thread', 0, 0)}
     need({(c['phase'], c['job'], c['repeat']) for c in calls} == identities, 'pthread fixture identities')
-    thread_rows = [dict(backend=1, entry=True, status=0, mode=int(c['job'] == 0),
+    thread_rows = [dict(backend=1, entry=True, status=0, failure_at=0, mode=int(c['job'] == 0),
                         shape=[7, 5, 9] if c['job'] else [5, 7, 9],
                         input_shape=[7, 5, 9] if c['job'] else [5, 7, 9]) for c in calls]
     python_result = compare(read(bundle['python_stderr']['path']), python_rows, policy, 'python')

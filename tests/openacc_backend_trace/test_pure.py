@@ -28,20 +28,35 @@ def policy():
                 explicit[kind].append(key)
     sites['metadata'] = dict(kind='upload', fields=dict(file='/invented non-executable/source.f90',
         function='fixed_descriptor', line='777', variable='descriptor'), proof='invented compiler report')
+    for kind,function in [('alloc','acc_malloc'),('delete','acc_free')]:
+        sites[kind]=dict(kind=kind,fields=dict(file='(OpenACC API)',function=function,line='1'),proof='invented API source proof')
+    sites['free']=dict(kind='free',fields=dict(file='/invented non-executable/source.f90',function='download_int32',line='999',queue='0'),proof='invented last runtime site proof')
     return dict(sites=sites, explicit=explicit, metadata=[], process_notices={
         key:dict(prefix=[], suffix=[]) for key in ('python', 'pthread')})
 
 
-def row(name='invented', status=0, entry=True, mode=1):
-    return dict(case_id=name, mode=mode, backend=1, shape=[1, 7, 9], input_shape=[5, 7, 9], status=status, entry=entry)
+def row(name='invented', status=0, entry=True, mode=1, failure_at=0):
+    return dict(case_id=name, mode=mode, backend=1, shape=[1, 7, 9], input_shape=[5, 7, 9], status=status, entry=entry,failure_at=failure_at)
 
 
 def notice(item, p):
     site, size = item; rule = p['sites'][site]; kind = rule['kind']
     fields = {key: ('2' if value is None else value) for key, value in rule['fields'].items()}
     fields.update(device='0', threadid='97')
-    if kind != 'launch':
-        fields['bytes'] = str(size)
+    if kind in v.TRANSFER_KINDS:
+        fields['bytes'] = str(max(size,512) if kind in ('alloc','delete','free') else size)
+    if kind in ('alloc','delete','free'):
+        fields['devaddr']='0x1000'
+    if kind.startswith('leave_'):
+        construct=kind[6:].replace('_',' ')
+        location=f"{fields.pop('file')} {fields.pop('function')}:{fields.pop('line')}"
+        return 'Leave '+construct+' '+location+' '+' '.join(f'{key}={value}' for key,value in fields.items())
+    if kind.startswith('enter_'):
+        construct=kind[6:].replace('_',' ')
+        prefix='Enter '+construct+(' region' if construct=='compute' else ' construct')
+        return prefix+' '+' '.join(f'{key}={value}' for key,value in fields.items())
+    if kind=='wait':
+        return 'Implicit wait  '+' '.join(f'{key}={value}' for key,value in fields.items())
     prefix = 'launch CUDA kernel' if kind == 'launch' else kind + ' CUDA data'
     return prefix + ' ' + ' '.join(f'{key}={value}' for key, value in fields.items())
 
@@ -54,10 +69,10 @@ def test_independent_buffer_formula_and_serial_order():
     p = policy(); rows = [row(mode=0), row(mode=1), row(status=6)]
     assert v.buffers(rows[0]) == [2520, 40, 280, 360, 1512, 63, 252, 252, 252]
     result = v.compare(log(rows, p), rows, p, 'python')
-    assert result['kinds'] == dict(upload=27, launch=3, download=15)
-    assert v.call_events(row(status=5), p) == []
+    assert result['kinds'] == dict(upload=27, launch=3, download=15, delete=27)
+    assert v.call_events(row(status=5,failure_at=1), p) == []
     assert v.call_events(row(status=3, entry=False), p) == []
-    assert len(v.call_events(row(status=3), p)) == 15
+    assert len(v.call_events(row(status=3), p)) == 24
 
 
 @pytest.mark.parametrize('change', ['drop', 'extra', 'device', 'bytes', 'function', 'file', 'line',
@@ -101,10 +116,109 @@ def test_metadata_must_be_explicit_counted_and_at_proven_site():
     with pytest.raises(v.Rejected):
         v.compare((notice(('metadata', 128), p) + '\n').encode() + raw, rows, p, 'python')
     p['metadata'] = [dict(gap=9, site='metadata', bytes=128, proof='invented fixed compiler metadata')]
-    assert v.compare(log(rows, p), rows, p, 'python')['notices'] == 16
+    assert v.compare(log(rows, p), rows, p, 'python')['notices'] == 25
     wrong = log(rows, p).replace(b'bytes=128', b'bytes=129')
     with pytest.raises(v.Rejected):
         v.compare(wrong, rows, p, 'python')
+
+
+def test_existing_m3b0_format_replay_is_not_m3b1_acceptance():
+    """Deidentified formats read from accepted M3B0 logs; not an M3B1 run."""
+    source='/invented archived M3B0/source.f90'
+    examples=[
+        ('alloc',f'alloc  CUDA data  devaddr=0x1000 bytes=512 file=(OpenACC API) function=acc_malloc line=1 device=0 threadid=1',
+         dict(file='(OpenACC API)',function='acc_malloc',line='1')),
+        ('delete',f'delete CUDA data  devaddr=0x1000 bytes=512 file=(OpenACC API) function=acc_free line=1 device=0 threadid=1',
+         dict(file='(OpenACC API)',function='acc_free',line='1')),
+        ('free',f'free   CUDA data  devaddr=0x1000 bytes=512 file={source} function=download_marker line=570 device=0 threadid=1 queue=0',
+         dict(file=source,function='download_marker',line='570',queue='0')),
+        ('enter_update',f'Enter update construct file={source} function=upload_real line=552 device=0 threadid=1 queue=0',
+         dict(file=source,function='upload_real',line='552',queue='0')),
+        ('upload',f'upload CUDA data  file={source} function=upload_real line=552 device=0 threadid=1 variable=values(:) bytes=136',
+         dict(file=source,function='upload_real',line='552',variable='values(:)')),
+        ('wait',f'Implicit wait  file={source} function=upload_real line=552 device=0 threadid=1 queue=acc_async_sync',
+         dict(file=source,function='upload_real',line='552',queue='acc_async_sync')),
+        ('leave_update',f'Leave update {source} upload_real:552 device=0 threadid=1',
+         dict(file=source,function='upload_real',line='552')),
+        ('enter_enter_data',f'Enter enter data construct file={source} function=add_one line=582 device=0 threadid=1 queue=0',
+         dict(file=source,function='add_one',line='582',queue='0')),
+        ('leave_enter_data',f'Leave enter data {source} add_one:582 device=0 threadid=1',
+         dict(file=source,function='add_one',line='582')),
+        ('enter_compute',f'Enter compute region file={source} function=add_one line=582 device=0 threadid=1',
+         dict(file=source,function='add_one',line='582')),
+        ('launch',f'launch CUDA kernel  file={source} function=add_one line=582 device=0 threadid=1 num_gangs=1 num_workers=1 vector_length=128 grid=1 block=128',
+         dict(file=source,function='add_one',line='582',num_gangs='1',num_workers='1',vector_length='128',grid='1',block='128')),
+        ('leave_compute',f'Leave compute {source} add_one:582 device=0 threadid=1',
+         dict(file=source,function='add_one',line='582')),
+        ('enter_exit_data',f'Enter exit data construct file={source} function=add_one line=582 device=0 threadid=1',
+         dict(file=source,function='add_one',line='582')),
+        ('leave_exit_data',f'Leave exit data {source} add_one:587 device=0 threadid=1',
+         dict(file=source,function='add_one',line='587')),
+        ('download',f'download CUDA data  file={source} function=download_real line=564 device=0 threadid=1 variable=values(:) bytes=136',
+         dict(file=source,function='download_real',line='564',variable='values(:)'))]
+    sites={str(i):dict(kind=kind,fields=fields,proof='deidentified old M3B0 format replay only')
+           for i,(kind,_,fields) in enumerate(examples)}
+    raw=('\n'.join(line for _,line,_ in examples)+'\n').encode()
+    rows=v.parse_notice_rows(raw,sites)
+    assert [row['kind'] for row in rows]==[kind for kind,_,_ in examples]
+    assert rows[0]['devaddr']=='0x1000' and rows[0]['bytes']==512
+    assert rows[4]['bytes']==136 and rows[10]['bytes']==0
+    with pytest.raises(v.Rejected):
+        v.parse_notice_rows(raw.replace(b'queue=0',b'queue=99',1),sites)
+    with pytest.raises(v.Rejected):
+        v.parse_notice_rows(raw.replace(b'0x1000',b'0x0',1),sites)
+
+
+def test_construct_waits_and_distinct_leave_lines_have_exact_sequence():
+    p=policy(); fields=dict(p['sites']['upload_rho']['fields']); fields.pop('variable')
+    for kind in ('enter_update','wait','leave_update'):
+        sitefields=dict(fields)
+        if kind=='enter_update':sitefields['queue']='0'
+        if kind=='wait':sitefields['queue']='acc_async_sync'
+        if kind=='leave_update':sitefields['line']='101'
+        p['sites'][kind]=dict(kind=kind,fields=sitefields,proof='invented compiler/source construct proof')
+    p['metadata']=[dict(gap=gap,site=kind,bytes=0,proof='invented fixed construct')
+                   for gap,kind in [(0,'enter_update'),(1,'wait'),(1,'leave_update')]]
+    raw=log([row()],p)
+    assert v.compare(raw,[row()],p,'python')['kinds']['wait']==1
+    with pytest.raises(v.Rejected):
+        v.compare(raw.replace(b'upload_rho:101',b'upload_rho:100'),[row()],p,'python')
+
+
+def test_logical_cleanup_counts_and_phase_from_preplanned_failure():
+    p=policy()
+    for failure in range(1,19):
+        r=row(f'fail-{failure}',status=5,failure_at=failure)
+        assert len(v.call_events(r,p))==max(failure-10,0)
+        raw=log([r],p) if failure>10 else b''
+        assert v.compare(raw,[r],p,'python')['runtime_api_observations']['delete']['count']==max(failure-10,0)
+    raw=log([row()],p); lines=raw.splitlines()
+    wrong=b'\n'.join([lines[-1],*lines[:-1]])+b'\n'
+    with pytest.raises(v.Rejected):v.compare(wrong,[row()],p,'python')
+    with pytest.raises(v.Rejected):v.compare(raw+b'\n'.join(lines[-1:])+b'\n',[row()],p,'python')
+
+
+def test_physical_api_observed_only_without_allocator_or_int32_assumptions():
+    p=policy(); raw=log([row()],p)
+    # Deliberately unmatched addresses and >INT32 bytes: no pooling/rounding or
+    # address-to-private-array claim is made by this observation boundary.
+    alloc=notice(('alloc',1<<33),p).replace('0x1000','0x2000')
+    free=notice(('free',1<<34),p).replace('0x1000','0x3000')
+    result=v.compare((alloc+'\n').encode()+raw+(free+'\n').encode(),[row()],p,'python')
+    assert result['runtime_api_observations']['alloc']==dict(count=1,bytes=1<<33,addresses=['0x2000'])
+    assert result['runtime_api_observations']['free']['bytes']==1<<34
+    for bad in [b'devaddr=0x0',b'devaddr=bogus',b'devaddr=0x10000000000000000']:
+        with pytest.raises(v.Rejected):
+            v.compare((alloc+'\n').encode().replace(b'devaddr=0x2000',bad)+raw,[row()],p,'python')
+
+
+@pytest.mark.parametrize('padding',['  ','\t',' \t '])
+def test_cuda_notices_accept_horizontal_padding(padding):
+    p=policy(); raw=log([row()],p)
+    raw=raw.replace(b' CUDA ',padding.encode()+b'CUDA'+padding.encode())
+    raw=raw.replace(b'data file',b'data'+padding.encode()+b'file')
+    raw=raw.replace(b'kernel file',b'kernel'+padding.encode()+b'file')
+    assert v.compare(raw,[row()],p,'python')['notices']==24
 
 
 @pytest.mark.parametrize('raw', [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'{"a":"\x00"}', b'\xff'])
@@ -138,7 +252,7 @@ def bundle_fixture(tmp_path):
     fake = v.fingerprint(placeholder)
     p.update(schema_version=1, state='PREPARED', review='invented parser preparation only',
              group_order=['public', 'private'], evidence={name:fake for name in (
-        'source', 'compiler_report', 'build_manifest', 'input_plan_source', 'receipt_verifier',
+        'source', 'compiler_report', 'build_manifest', 'input_plan_source', 'control_plan_source', 'receipt_verifier',
         'thread_verifier', 'controller', 'library', 'bridge', 'thread_binary', 'corpus', 'case_ids')})
     p['evidence']['trace_verifier'] = v.fingerprint(v.__file__)
     plan = dict(schema_version=1, public=[row('public-invented')], private=[row('private-invented', status=6)])
@@ -159,7 +273,7 @@ def bundle_fixture(tmp_path):
     receipt_ref = write_json(tmp_path / 'receipt-check.json', dict(schema_version=1, state='PASS', artifacts=artifacts))
     ids = [('concurrent', j, r) for j in (0, 1) for r in (0, 1)] + [('migration-new-thread', 0, 0), ('migration-main-thread', 0, 0)]
     calls = [dict(phase=phase, job=job, repeat=repeat, output_sha256='0'*64) for phase, job, repeat in ids]
-    thread_rows = [dict(backend=1, entry=True, status=0, mode=int(job==0),
+    thread_rows = [dict(backend=1, entry=True, status=0, failure_at=0, mode=int(job==0),
         shape=[7,5,9] if job else [5,7,9], input_shape=[7,5,9] if job else [5,7,9]) for _,job,_ in ids]
     pyerr = tmp_path / 'python.stderr'; pyerr.write_bytes(log(plan['public']+plan['private'], p))
     therr = tmp_path / 'pthread.stderr'; therr.write_bytes(log(thread_rows, p))
@@ -183,6 +297,20 @@ def test_full_compare_prepared_never_claims_pass(tmp_path):
     assert report['state'] == 'PREPARED'
     assert report['python']['kinds']['launch'] == 2
     assert report['pthread']['kinds']['launch'] == 6
+
+
+def test_failure_plan_must_match_verified_configure_receipts(tmp_path):
+    policy_path,digest,bundle_path=bundle_fixture(tmp_path)
+    bundle=json.loads(bundle_path.read_text()); path=Path(bundle['receipt_check']['path'])
+    report=json.loads(path.read_text()); directory=tmp_path/'private'
+    evaluate_path=directory/'0002.json'; evaluation=json.loads(evaluate_path.read_text())
+    evaluation['ordinal']=3
+    configure=dict(kind='private-configure',ordinal=2,status=0,context_id=1,failure_at=1)
+    report['artifacts']=[item for item in report['artifacts'] if item['path']!=str(evaluate_path)]
+    report['artifacts'] += [write_json(evaluate_path,configure),write_json(directory/'0003.json',evaluation)]
+    rebind_capture(bundle_path,receipt_ref=write_json(path,report))
+    with pytest.raises(v.Rejected,match='independent failure_at plan'):
+        v.verify(policy_path,digest,bundle_path)
 
 
 @pytest.mark.parametrize('change', ['policy-hash', 'source-hash', 'upstream-missing', 'not-tested',
@@ -235,8 +363,10 @@ def test_policy_exact_schema_and_review_requirements(tmp_path, change):
 def test_frozen_inventory_has_exact_350_evaluations_272_regions():
     def make(count, active):
         return [row(str(i),entry=i<active) for i in range(count)]
-    plan=dict(schema_version=1, public=make(295,238),private=make(55,34))
+    private=make(34,34)+[row(name,status=5,failure_at=n) for name,n in v.FAILURE_PLAN.items()]+[row('preflight',entry=False)]
+    plan=dict(schema_version=1, public=make(295,238),private=private)
     v.plan_rows(plan, False)
+    assert sum(v.device_acquisitions(r) for group in ('public','private') for r in plan[group])==2484
     plan['public'][238]['entry']=True
     with pytest.raises(v.Rejected):
         v.plan_rows(plan,False)
