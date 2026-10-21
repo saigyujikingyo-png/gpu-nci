@@ -12,13 +12,14 @@
   Difficult independent reviews may use GPT-6 Astra max.
 - A cross-review is read-only: report findings, do not edit the other author's
   checkout and do not invoke the other model recursively.
-- Small synthetic unit tests, compilation, and empty device smoke are allowed.
-  On 2026-10-21 the user also authorized automatic scientific and performance
-  execution for this project, superseding its earlier manual-launch rule.
-  Freeze a finite package with input provenance, resource/time limits, logs,
-  exit status and stop conditions first; a GPT-6.1 Sol subagent must manage
-  execution. Preserve scientific acceptance gates. Do not kill unrelated
-  processes or expand the frozen run. This approval does not cover other projects.
+- The latest user-supplied execution instructions restore manual launch:
+  agents prepare and review finite packages and perform only necessary light
+  syntax, input, hash and empty-control checks; do not launch scientific or
+  performance calculations. The user closes resource-consuming applications
+  and starts the independent launcher. A GPT-6.1 Sol agent prepares the bounded
+  controller and later checks actual receipts. Preserve input provenance,
+  limits, stop controls, logs, exit status, failed evidence and acceptance gates.
+  Do not kill unrelated processes, expand a frozen run or replay a used package.
 - Never commit credentials, private prompts/replies, personal host metadata,
   environment files, or real input data without explicit public-use provenance.
 - Update ignored `.agents/handoff.md` before handing off modified files.
