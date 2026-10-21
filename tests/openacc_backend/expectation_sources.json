@@ -14,8 +14,8 @@
     },
     {
       "path": "tests/oracle/slab_cases.py",
-      "sha256": "dc490d69b927e8e2934205052fe6613ea0d04094ab2117cf0e2c4e9a6ede3cba",
-      "bytes": 4747
+      "sha256": "ba16bf824cc038fb13659095d6930e5d2f24dde7264860549c7f97c140d49cfc",
+      "bytes": 4788
     },
     {
       "path": "tests/oracle/test_library_fields.py",
