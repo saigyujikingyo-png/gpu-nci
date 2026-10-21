@@ -145,7 +145,12 @@ returns all1336 original tokens; rejected cases return exit2 with no stdout.
 The preliminary count-only9-case development run remains separately preserved
 at `.../m3a-parser-fix-20261020T235634932320Z`; final acceptance uses the full
 canonical-token run. No numerical or GPU executable was run by this repair.
-The full finite probe remains pending a newly frozen, root-owned execution.
+After that repair was frozen at `5a5657f`, root ran the original fixed corpus
+once on the host and once on the NVIDIA GPU. Both exited0 and the independent
+verifier passed all36scalar/9RDG/9point records. Actual kernel and transfer
+evidence was retained. Full scope and measured finite errors are recorded in
+the integration branch's `docs/openacc-probe-results.md`; this does not enable
+the public GPU backend or constitute scientific/performance acceptance.
 
 AI assistance: Claude Opus 5.5 max authored the experiment, adapter and drivers;
 GPT-6 Astra defined the contract, reviewed and completed its documentation;
