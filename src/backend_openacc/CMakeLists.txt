@@ -77,6 +77,13 @@ add_custom_command(
   COMMENT "nci_openacc: insertion-only device adaptation of the production sources"
   VERBATIM)
 
+# Only these three carry NCI_BENCHMARK conditionals (private P1 timing objects
+# below), so only they are preprocessed. Without the definition, as in
+# nci_openacc_objects, they compile exactly the original code.
+set_source_files_properties("${_nci_acc_gen}/nci_kernel.f90"
+  "${CMAKE_CURRENT_SOURCE_DIR}/nci_acc_backend.f90" "${_nci_acc_cpu}/nci_capi.f90"
+  PROPERTIES Fortran_PREPROCESS ON)
+
 # One object set for the shared library and for the private test bridge, which
 # must link these same objects. The common C API and validation are the
 # production files; nci_acc_backend.f90 replaces the CPU library's stub.
@@ -116,3 +123,58 @@ set(_nci_acc_map "${CMAKE_CURRENT_SOURCE_DIR}/nci_openacc.map")
 target_link_options(nci_openacc PRIVATE "LINKER:--version-script=${_nci_acc_map}"
   "LINKER:--no-undefined")
 set_property(TARGET nci_openacc APPEND PROPERTY LINK_DEPENDS "${_nci_acc_map}")
+
+# Private P1 benchmark objects (NCI_BUILD_BENCHMARKS, declared OFF by the root
+# build; src/benchmark/core/README.md): the same object list compiled again
+# with NCI_BENCHMARK into its own module directory, with the timing record and
+# clock of src/benchmark/core. nci_openacc, its tests and the worker never use
+# them. A benchmark executable links exactly this object target and the reader
+# built by the same compiler, never nci_openacc as well; the definition, module
+# path, Fortran device/host options, device link, OpenMP and the CUDA runtime
+# propagate to it. Its runtime search path remains the executable's concern.
+if(NCI_BUILD_BENCHMARKS)
+  if(NOT NCI_ENABLE_OPENMP)
+    message(FATAL_ERROR "NCI_BUILD_BENCHMARKS requires NCI_ENABLE_OPENMP")
+  endif()
+  # CUDA event API: the runtime library of this SDK's CUDA 13.3 toolkit (the
+  # one the device flags select), located explicitly, never a system copy.
+  get_filename_component(_nci_bench_bin "${CMAKE_Fortran_COMPILER}" DIRECTORY)
+  get_filename_component(_nci_bench_compilers "${_nci_bench_bin}/.." REALPATH)
+  get_filename_component(_nci_bench_sdk "${_nci_bench_compilers}/.." REALPATH)
+  find_library(NCI_BENCH_CUDART NAMES cudart libcudart.so.13
+    PATHS "${_nci_bench_sdk}/cuda/13.3/lib64" "${_nci_bench_sdk}/cuda/13.3/targets/x86_64-linux/lib"
+    NO_DEFAULT_PATH)
+  if(NOT NCI_BENCH_CUDART)
+    message(FATAL_ERROR "NCI_BUILD_BENCHMARKS: libcudart of ${_nci_bench_sdk}/cuda/13.3 not found")
+  endif()
+  set(_nci_bench_core "${CMAKE_CURRENT_SOURCE_DIR}/../benchmark/core")
+  add_library(nci_openacc_bench_objects OBJECT
+    "${_nci_bench_core}/nci_bench_clock.c"
+    "${_nci_bench_core}/nci_bench_types.f90"
+    "${_nci_acc_gen}/nci_kinds.f90"
+    "${_nci_acc_cpu}/nci_abi.f90"
+    "${_nci_acc_gen}/nci_numerics.f90"
+    "${_nci_acc_cpu}/nci_validate.f90"
+    "${_nci_acc_gen}/nci_kernel.f90"
+    "${CMAKE_CURRENT_SOURCE_DIR}/nci_acc_backend.f90"
+    "${_nci_acc_cpu}/nci_capi.f90")
+  set(_nci_acc_bench_moddir "${CMAKE_CURRENT_BINARY_DIR}/bench_modules")
+  set_target_properties(nci_openacc_bench_objects PROPERTIES
+    Fortran_MODULE_DIRECTORY "${_nci_acc_bench_moddir}"
+    Fortran_PREPROCESS OFF
+    EXPORT_COMPILE_COMMANDS ON)
+  target_include_directories(nci_openacc_bench_objects PUBLIC "$<BUILD_INTERFACE:${_nci_acc_bench_moddir}>")
+  target_compile_definitions(nci_openacc_bench_objects PUBLIC NCI_BENCHMARK)
+  # Fortran only: the C clock helper keeps the C flags.
+  target_compile_options(nci_openacc_bench_objects PRIVATE
+    "$<$<COMPILE_LANGUAGE:Fortran>:${NCI_OPENACC_DEVICE_FLAGS};${NCI_OPENACC_HOST_FLAGS};${NCI_OPENACC_REPORT}>")
+  target_compile_options(nci_openacc_bench_objects INTERFACE
+    "$<$<COMPILE_LANGUAGE:Fortran>:${NCI_OPENACC_DEVICE_FLAGS};${NCI_OPENACC_HOST_FLAGS}>")
+  target_link_options(nci_openacc_bench_objects INTERFACE ${NCI_OPENACC_DEVICE_FLAGS})
+  target_link_libraries(nci_openacc_bench_objects PUBLIC OpenMP::OpenMP_Fortran "${NCI_BENCH_CUDART}")
+  # Two object targets now compile the generated sources: one custom target
+  # drives the generator, so a parallel build never runs it twice.
+  add_custom_target(nci_openacc_device_sources DEPENDS ${_nci_acc_generated})
+  add_dependencies(nci_openacc_objects nci_openacc_device_sources)
+  add_dependencies(nci_openacc_bench_objects nci_openacc_device_sources)
+endif()

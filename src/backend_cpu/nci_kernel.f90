@@ -10,6 +10,10 @@ module nci_kernel
                      FLAG_LAMBDA_NUM_UNCERTAIN, FLAG_LAMBDA_SCI_UNCERTAIN, FLAG_NOT_VALID_MASK
   use nci_numerics
   use nci_validate, only: tile_layout
+#ifdef NCI_BENCHMARK
+  use omp_lib, only: omp_get_num_threads
+  use nci_bench_types, only: nci_bench_clock_ns
+#endif
   implicit none
   private
 
@@ -133,8 +137,17 @@ contains
   !> samples, the outputs lay%nout points.  counts(0:6) = per-bit counts,
   !> counts(7) = |V|.  The neighbour tables take 40*(B+Ny+Nz) bytes; no output
   !> is written when they cannot be allocated.
+  !> NCI_BENCHMARK builds only: span_ns are the monotonic clock readings (ns,
+  !> -1 on failure) just before and after the parallel construct (fork/join,
+  !> loop, barrier, count reduction) and team the omp_get_num_threads value
+  !> of the unique (ix=0, iy=0) iteration, read after the construct; -1 and 0
+  !> when the loop did not run.
   subroutine evaluate_grid(lay, periodic, m, rho, rho_min, has_negative, diagnostic, &
-                           nthreads, rdg, srho, lam2, grad, hess, flags, counts, kstatus)
+                           nthreads, rdg, srho, lam2, grad, hess, flags, counts, kstatus &
+#ifdef NCI_BENCHMARK
+                           , span_ns, team &
+#endif
+                           )
     type(tile_layout), intent(in) :: lay
     logical, intent(in) :: periodic(3), has_negative, diagnostic
     real(dp), intent(in) :: m(3, 3), rho(:), rho_min
@@ -143,13 +156,25 @@ contains
     integer(i8), intent(inout) :: flags(:)
     integer(i64), intent(out) :: counts(0:7)
     integer, intent(out) :: kstatus
+#ifdef NCI_BENCHMARK
+    integer(i64), intent(out) :: span_ns(2)
+    integer, intent(out) :: team
+#endif
 
     integer(i64), allocatable :: tx(:, :), ty(:, :), tz(:, :)
     integer(i64) :: nx, ny, nz, x0, nb, ix, iy, iz, p, cnt(0:7)
     integer :: off(3, 61), fl, k, ierr
+#ifdef NCI_BENCHMARK
+    integer :: team_seen
+#endif
     real(dp) :: blk(-2:2, -2:2, -2:2), absm(3, 3), floor_abs, nan
     type(point_result) :: res
 
+#ifdef NCI_BENCHMARK
+    span_ns = -1
+    team = 0
+    team_seen = 0
+#endif
     nx = lay%gn(1)
     ny = lay%gn(2)
     nz = lay%gn(3)
@@ -170,12 +195,23 @@ contains
     blk = 0.0_dp
     cnt = 0
 
+#ifdef NCI_BENCHMARK
+    span_ns(1) = nci_bench_clock_ns()
+    !$omp parallel do collapse(2) schedule(static) num_threads(nthreads) default(none) &
+    !$omp   shared(nx, ny, nz, x0, nb, periodic, tx, ty, tz, off, rho, rho_min, has_negative, &
+    !$omp          diagnostic, m, absm, floor_abs, nan, rdg, srho, lam2, grad, hess, flags, team_seen) &
+    !$omp   firstprivate(blk) private(ix, iy, iz, p, fl, k, res) reduction(+:cnt)
+#else
     !$omp parallel do collapse(2) schedule(static) num_threads(nthreads) default(none) &
     !$omp   shared(nx, ny, nz, x0, nb, periodic, tx, ty, tz, off, rho, rho_min, has_negative, &
     !$omp          diagnostic, m, absm, floor_abs, nan, rdg, srho, lam2, grad, hess, flags) &
     !$omp   firstprivate(blk) private(ix, iy, iz, p, fl, k, res) reduction(+:cnt)
+#endif
     do ix = 0, nb - 1
       do iy = 0, ny - 1
+#ifdef NCI_BENCHMARK
+        if (ix == 0 .and. iy == 0) team_seen = omp_get_num_threads()
+#endif
         do iz = 0, nz - 1
           p = (ix*ny + iy)*nz + iz + 1
           call classify_point(x0 + ix, iy, iz, nx, ny, nz, periodic, tx(:, ix), ty(:, iy), &
@@ -220,6 +256,10 @@ contains
       end do
     end do
     !$omp end parallel do
+#ifdef NCI_BENCHMARK
+    span_ns(2) = nci_bench_clock_ns()
+    team = team_seen
+#endif
     counts = cnt
   end subroutine evaluate_grid
 

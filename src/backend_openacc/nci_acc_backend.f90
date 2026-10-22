@@ -31,6 +31,11 @@
 !>   call, destroy included). No status 6 follows a write of caller arrays.
 !> * No I/O, no STOP, no OpenACC error callback: a fatal runtime error ends
 !>   the process (the worker boundary). There is no CPU fallback.
+!> * NCI_BENCHMARK builds (the private P1 benchmark objects only) launch the
+!>   same kernel on one fixed async queue between CUDA events recorded on that
+!>   queue's actual stream, wait for the queue at once and fill the caller's
+!>   context-local timing record; they never change a status, a commit or the
+!>   resource handling (src/benchmark/core/README.md).
 module nci_acc_backend
   use, intrinsic :: iso_c_binding, only: c_ptr, c_null_ptr, c_loc, c_f_pointer, c_associated, &
                                          c_int, c_int32_t, c_int64_t, c_size_t
@@ -48,6 +53,19 @@ module nci_acc_backend
                           JACOBI_MAX_ROTATIONS, PT_OK, PT_NONFINITE_DERIVATIVE, PT_NONFINITE_RESULT
   use nci_validate, only: message_t, msg_set, msg_add, msg_add_int, tile_layout, mul_overflows
   use nci_kernel, only: axis_table, classify_point
+#ifdef NCI_BENCHMARK
+  use, intrinsic :: iso_c_binding, only: c_float, c_double
+  use openacc, only: acc_get_cuda_stream, acc_handle_kind
+  use nci_bench_types, only: nci_bench_record, nci_bench_clock_ns, nci_bench_fail, &
+                             nci_bench_interval, NCI_BENCH_VALID, NCI_BENCH_ERR_EVENT_CREATE, &
+                             NCI_BENCH_ERR_STREAM_NULL, NCI_BENCH_ERR_RECORD_START, &
+                             NCI_BENCH_ERR_RECORD_STOP, NCI_BENCH_ERR_STREAM_CHANGED, &
+                             NCI_BENCH_ERR_EVENT_INCOMPLETE, NCI_BENCH_ERR_EVENT_QUERY, &
+                             NCI_BENCH_ERR_ELAPSED, NCI_BENCH_ERR_EVENT_DESTROY, &
+                             NCI_BENCH_FAULT_CREATE_START, NCI_BENCH_FAULT_CREATE_STOP, &
+                             NCI_BENCH_FAULT_RECORD_START, NCI_BENCH_FAULT_RECORD_STOP, &
+                             NCI_BENCH_FAULT_NULL_STREAM
+#endif
   implicit none
   private
 
@@ -161,6 +179,59 @@ module nci_acc_backend
     integer(i64) :: values(ACC_OBSERVE_VALUES) = 0
     integer(i64) :: events(ACC_EVENT_COLUMNS, ACC_EVENT_CAPACITY) = 0
   end type acc_workspace
+
+#ifdef NCI_BENCHMARK
+  !> Fixed OpenACC async queue of the benchmark field launch.
+  integer(acc_handle_kind), parameter :: BENCH_QUEUE = 1
+  !> CUDA runtime 13.3 values (driver_types.h): cudaSuccess,
+  !> cudaErrorNotReady, cudaErrorUnknown (reported by an injected test
+  !> fault instead of calling the runtime) and cudaEventDefault (timing on).
+  integer(c_int), parameter :: CUDA_SUCCESS = 0, CUDA_ERROR_NOT_READY = 600, &
+                               CUDA_ERROR_UNKNOWN = 999, CUDA_EVENT_DEFAULT = 0
+
+  !> Call-local timing state of one benchmark evaluation. Its two event
+  !> handles are created and destroyed within that evaluation and are never
+  !> stored in the workspace.
+  type :: bench_events
+    type(c_ptr) :: start = c_null_ptr, finish = c_null_ptr
+    integer(c_int64_t) :: stream = 0, device_t0 = -1, device_t1 = -1
+    integer(c_int32_t) :: fault = 0
+    logical :: started = .false., finished = .false., measured = .false.
+  end type bench_events
+
+  !> CUDA runtime event API of the SDK's libcudart (plain C entry points;
+  !> cuda_runtime_api.h renames none of them without per-thread default
+  !> streams). cudaEvent_t and cudaStream_t are C pointers.
+  interface
+    function cuda_event_create(event, flags) bind(C, name='cudaEventCreateWithFlags') result(rc)
+      import :: c_ptr, c_int
+      type(c_ptr), intent(out) :: event
+      integer(c_int), value :: flags
+      integer(c_int) :: rc
+    end function cuda_event_create
+    function cuda_event_record(event, stream) bind(C, name='cudaEventRecord') result(rc)
+      import :: c_ptr, c_int
+      type(c_ptr), value :: event, stream
+      integer(c_int) :: rc
+    end function cuda_event_record
+    function cuda_event_query(event) bind(C, name='cudaEventQuery') result(rc)
+      import :: c_ptr, c_int
+      type(c_ptr), value :: event
+      integer(c_int) :: rc
+    end function cuda_event_query
+    function cuda_event_elapsed(ms, start, finish) bind(C, name='cudaEventElapsedTime') result(rc)
+      import :: c_ptr, c_int, c_float
+      real(c_float), intent(out) :: ms
+      type(c_ptr), value :: start, finish
+      integer(c_int) :: rc
+    end function cuda_event_elapsed
+    function cuda_event_destroy(event) bind(C, name='cudaEventDestroy') result(rc)
+      import :: c_ptr, c_int
+      type(c_ptr), value :: event
+      integer(c_int) :: rc
+    end function cuda_event_destroy
+  end interface
+#endif
 
 contains
 
@@ -358,10 +429,16 @@ contains
   !> derived from the downloaded flags and the first numeric failure is
   !> reported by its downloaded status, rotation count and global index
   !> (-1 when absent). On 1, 5 or 6 nothing has been written.
+  !> NCI_BENCHMARK builds only: timing is the caller's context-local record
+  !> (already reset) and fault the consumed test-only event fault mode.
   recursive subroutine acc_backend_evaluate(handle, lay, periodic, m, rho, rho_min, has_negative, &
                                             diagnostic, rdg, srho, lam2, grad, hess, flags, &
                                             counts, first_global, first_status, first_nrot, &
-                                            status, msg)
+                                            status, msg &
+#ifdef NCI_BENCHMARK
+                                            , timing, fault &
+#endif
+                                            )
     type(c_ptr), intent(in) :: handle
     type(tile_layout), intent(in) :: lay
     logical, intent(in) :: periodic(3), has_negative, diagnostic
@@ -372,6 +449,11 @@ contains
     integer, intent(out) :: first_status, first_nrot
     integer(c_int), intent(out) :: status
     type(message_t), intent(inout) :: msg
+#ifdef NCI_BENCHMARK
+    type(nci_bench_record), intent(inout) :: timing
+    integer(c_int32_t), intent(in) :: fault
+    type(bench_events) :: ev
+#endif
     type(acc_workspace), pointer :: ws
     type(device_state) :: saved
     integer(c_int) :: step_status
@@ -463,9 +545,21 @@ contains
       return
     end if
 
+#ifdef NCI_BENCHMARK
+    ! Timing events in the context of the completed acquisitions, outside
+    ! the device interval; destroyed after the last download, before any
+    ! later return. Nothing between here and there returns.
+    ev%fault = fault
+    call bench_create(ev, timing)
+#endif
     ! Inputs, poisoned outputs/metadata, one kernel, poisoned host copies,
-    ! downloads. Every construct is synchronous (no async clause).
+    ! downloads. Every construct is synchronous (no async clause), except
+    ! that NCI_BENCHMARK builds launch the kernel on BENCH_QUEUE and wait for
+    ! that queue immediately.
     call fill_inputs(ws, lay, periodic, rho)
+#ifdef NCI_BENCHMARK
+    ev%device_t0 = nci_bench_clock_ns()
+#endif
     call upload_real1(ws%plan%nin, ws%host%rho)
     call record(ws, ACT_UPLOAD, OBJ_RHO)
     call upload_table(ws%plan%nb, ws%host%tx)
@@ -486,12 +580,22 @@ contains
     call upload_int32(ws%plan%nout, ws%host%marker)
     call record(ws, ACT_UPLOAD, OBJ_MARKER)
     floor_abs = underflow_floor(abs(m))
+#ifdef NCI_BENCHMARK
+    ! After every upload: the queue's actual stream and the start event,
+    ! the unchanged launch on that queue, the stop event, the immediate wait.
+    call bench_begin(ev, timing)
+#endif
     call launch_kernel(ws%plan%nin, ws%plan%nb, ws%plan%ny, ws%plan%nz, ws%plan%nf, &
                        ws%plan%nout, lay%gn(1), lay%x0, periodic(1), periodic(2), periodic(3), &
                        m(1, 1), m(2, 1), m(3, 1), m(1, 2), m(2, 2), m(3, 2), m(1, 3), m(2, 3), &
                        m(3, 3), floor_abs, rho_min, has_negative, diagnostic, ws%host%rho, &
                        ws%host%tx, ws%host%ty, ws%host%tz, ws%host%fields, ws%host%flags, &
                        ws%host%pstat, ws%host%nrot, ws%host%marker)
+#ifdef NCI_BENCHMARK
+    call bench_end(ev, timing)
+    !$acc wait(BENCH_QUEUE)
+    call bench_finish(ev, timing)
+#endif
     call record(ws, ACT_KERNEL, 0)
     call poison_staging(ws)
     call download_fields(ws%plan%nf, ws%plan%nout, ws%host%fields)
@@ -503,6 +607,10 @@ contains
     call download_int32(ws%plan%nout, ws%host%nrot)
     call record(ws, ACT_DOWNLOAD, OBJ_NROT)
     call download_int32(ws%plan%nout, ws%host%marker)
+#ifdef NCI_BENCHMARK
+    ev%device_t1 = nci_bench_clock_ns()
+    call bench_close(ev, timing)
+#endif
     call record(ws, ACT_DOWNLOAD, OBJ_MARKER)
 
     ! Test-only corruption of downloaded output point 1, never of the kernel.
@@ -1230,6 +1338,168 @@ contains
     !$acc update self(x)
   end subroutine download_int32
 
+#ifdef NCI_BENCHMARK
+  ! ------------------------------------------------------------------------
+  ! Benchmark timing (NCI_BUILD_BENCHMARKS objects only). Every failure is a
+  ! timing failure of the caller's record; none changes the evaluation.
+  ! ------------------------------------------------------------------------
+
+  !> Creates the start and stop events (default flags: timing enabled) in
+  !> the calling thread's current context, which the completed acquisitions
+  !> have just used. A failed creation is a timing failure; after a partial
+  !> creation the created event is destroyed at once.
+  recursive subroutine bench_create(ev, timing)
+    type(bench_events), intent(inout) :: ev
+    type(nci_bench_record), intent(inout) :: timing
+    integer(c_int) :: rc
+    rc = CUDA_ERROR_UNKNOWN
+    if (ev%fault /= NCI_BENCH_FAULT_CREATE_START) rc = cuda_event_create(ev%start, CUDA_EVENT_DEFAULT)
+    if (rc /= CUDA_SUCCESS .or. .not. c_associated(ev%start)) then
+      ev%start = c_null_ptr
+      call nci_bench_fail(timing, NCI_BENCH_ERR_EVENT_CREATE)
+      return
+    end if
+    timing%events_created = timing%events_created + 1
+    rc = CUDA_ERROR_UNKNOWN
+    if (ev%fault /= NCI_BENCH_FAULT_CREATE_STOP) rc = cuda_event_create(ev%finish, CUDA_EVENT_DEFAULT)
+    if (rc /= CUDA_SUCCESS .or. .not. c_associated(ev%finish)) then
+      ev%finish = c_null_ptr
+      call nci_bench_fail(timing, NCI_BENCH_ERR_EVENT_CREATE)
+      call bench_destroy(ev, timing)
+      return
+    end if
+    timing%events_created = timing%events_created + 1
+  end subroutine bench_create
+
+  !> Destroys every event still held. Each confirmed destruction is counted;
+  !> a failed one is a timing failure and its handle is not used again.
+  recursive subroutine bench_destroy(ev, timing)
+    type(bench_events), intent(inout) :: ev
+    type(nci_bench_record), intent(inout) :: timing
+    if (c_associated(ev%start)) then
+      if (cuda_event_destroy(ev%start) == CUDA_SUCCESS) then
+        timing%events_destroyed = timing%events_destroyed + 1
+      else
+        call nci_bench_fail(timing, NCI_BENCH_ERR_EVENT_DESTROY)
+      end if
+      ev%start = c_null_ptr
+    end if
+    if (c_associated(ev%finish)) then
+      if (cuda_event_destroy(ev%finish) == CUDA_SUCCESS) then
+        timing%events_destroyed = timing%events_destroyed + 1
+      else
+        call nci_bench_fail(timing, NCI_BENCH_ERR_EVENT_DESTROY)
+      end if
+      ev%finish = c_null_ptr
+    end if
+  end subroutine bench_destroy
+
+  !> After every upload: the actual CUDA stream of BENCH_QUEUE, which is
+  !> never replaced by a default stream (a null handle is a timing failure),
+  !> then the start event on that stream.
+  recursive subroutine bench_begin(ev, timing)
+    type(bench_events), intent(inout) :: ev
+    type(nci_bench_record), intent(inout) :: timing
+    integer(c_int) :: rc
+    ev%stream = int(acc_get_cuda_stream(BENCH_QUEUE), c_int64_t)
+    if (ev%fault == NCI_BENCH_FAULT_NULL_STREAM) ev%stream = 0
+    timing%stream_handle = ev%stream
+    if (ev%stream == 0) then
+      call nci_bench_fail(timing, NCI_BENCH_ERR_STREAM_NULL)
+      return
+    end if
+    if (.not. (c_associated(ev%start) .and. c_associated(ev%finish))) return
+    rc = CUDA_ERROR_UNKNOWN
+    if (ev%fault /= NCI_BENCH_FAULT_RECORD_START) &
+      rc = cuda_event_record(ev%start, transfer(ev%stream, c_null_ptr))
+    if (rc /= CUDA_SUCCESS) then
+      call nci_bench_fail(timing, NCI_BENCH_ERR_RECORD_START)
+      return
+    end if
+    ev%started = .true.
+  end subroutine bench_begin
+
+  !> Immediately after the launch returned: the stop event on the same
+  !> stream, before the queue wait; then the launch is counted.
+  recursive subroutine bench_end(ev, timing)
+    type(bench_events), intent(inout) :: ev
+    type(nci_bench_record), intent(inout) :: timing
+    integer(c_int) :: rc
+    if (ev%started) then
+      rc = CUDA_ERROR_UNKNOWN
+      if (ev%fault /= NCI_BENCH_FAULT_RECORD_STOP) &
+        rc = cuda_event_record(ev%finish, transfer(ev%stream, c_null_ptr))
+      if (rc == CUDA_SUCCESS) then
+        ev%finished = .true.
+      else
+        call nci_bench_fail(timing, NCI_BENCH_ERR_RECORD_STOP)
+      end if
+    end if
+    timing%kernel_count = timing%kernel_count + 1
+    timing%async_queue = int(BENCH_QUEUE, c_int32_t)
+  end subroutine bench_end
+
+  !> After the queue wait: the queue must still map to the same stream, both
+  !> events must already be complete (queried, not waited for), and only
+  !> then is the elapsed time taken; it must be finite and nonnegative.
+  recursive subroutine bench_finish(ev, timing)
+    type(bench_events), intent(inout) :: ev
+    type(nci_bench_record), intent(inout) :: timing
+    real(c_float) :: ms
+    if (ev%stream /= 0) then
+      if (int(acc_get_cuda_stream(BENCH_QUEUE), c_int64_t) /= ev%stream) &
+        call nci_bench_fail(timing, NCI_BENCH_ERR_STREAM_CHANGED)
+    end if
+    if (.not. ev%finished) return
+    call bench_completed(ev%start, timing)
+    call bench_completed(ev%finish, timing)
+    if (timing%timing_error /= 0) return
+    ms = 0.0_c_float
+    if (cuda_event_elapsed(ms, ev%start, ev%finish) /= CUDA_SUCCESS) then
+      call nci_bench_fail(timing, NCI_BENCH_ERR_ELAPSED)
+      return
+    end if
+    if (.not. (ms >= 0.0_c_float .and. ms <= huge(ms))) then
+      call nci_bench_fail(timing, NCI_BENCH_ERR_ELAPSED)
+      return
+    end if
+    timing%kernel_seconds = real(ms, c_double)/1000.0_c_double
+    ev%measured = .true.
+  end subroutine bench_finish
+
+  recursive subroutine bench_completed(event, timing)
+    type(c_ptr), intent(in) :: event
+    type(nci_bench_record), intent(inout) :: timing
+    integer(c_int) :: rc
+    rc = cuda_event_query(event)
+    if (rc == CUDA_ERROR_NOT_READY) then
+      call nci_bench_fail(timing, NCI_BENCH_ERR_EVENT_INCOMPLETE)
+    else if (rc /= CUDA_SUCCESS) then
+      call nci_bench_fail(timing, NCI_BENCH_ERR_EVENT_QUERY)
+    end if
+  end subroutine bench_completed
+
+  !> After the last download: destroys the events, then takes the device
+  !> interval from the clock readings before the first upload and after the
+  !> last download. The record is valid only when no step failed.
+  recursive subroutine bench_close(ev, timing)
+    type(bench_events), intent(inout) :: ev
+    type(nci_bench_record), intent(inout) :: timing
+    real(c_double) :: seconds
+    integer(c_int32_t) :: code
+    call bench_destroy(ev, timing)
+    call nci_bench_interval(ev%device_t0, ev%device_t1, seconds, code)
+    if (code /= 0) then
+      call nci_bench_fail(timing, code)
+    else
+      timing%device_seconds = seconds
+    end if
+    if (timing%timing_error == 0 .and. .not. ev%measured) &
+      call nci_bench_fail(timing, NCI_BENCH_ERR_ELAPSED)
+    if (timing%timing_error == 0) timing%state = NCI_BENCH_VALID
+  end subroutine bench_close
+#endif
+
   ! ------------------------------------------------------------------------
   ! Kernel
   ! ------------------------------------------------------------------------
@@ -1238,6 +1508,8 @@ contains
   !> arrays (present: no implicit data movement; scalars are launch values).
   !> Each iteration writes its marker from acc_on_device in this region and
   !> evaluates the point with the production classifier and point_eval.
+  !> NCI_BENCHMARK builds enqueue the same region on BENCH_QUEUE; the caller
+  !> waits for that queue before any further device operation.
   recursive subroutine launch_kernel(nin, nb, ny, nz, nf, nout, nx, x0, px, py, pz, m1, m2, m3, &
                                      m4, m5, m6, m7, m8, m9, floor_abs, rho_min, has_negative, &
                                      diagnostic, rho, tx, ty, tz, fields, flags, pstat, nrot, marker)
@@ -1251,10 +1523,17 @@ contains
     integer(i32), intent(inout) :: pstat(nout), nrot(nout), marker(nout)
     integer(i64) :: ix, iy, iz, p
 
+#ifdef NCI_BENCHMARK
+    !$acc parallel loop collapse(3) default(none) private(p) async(BENCH_QUEUE) &
+    !$acc   present(rho, tx, ty, tz, fields, flags, pstat, nrot, marker) &
+    !$acc   firstprivate(nin, nb, ny, nz, nf, nout, nx, x0, px, py, pz, m1, m2, m3, m4, m5, m6, &
+    !$acc                m7, m8, m9, floor_abs, rho_min, has_negative, diagnostic)
+#else
     !$acc parallel loop collapse(3) default(none) private(p) &
     !$acc   present(rho, tx, ty, tz, fields, flags, pstat, nrot, marker) &
     !$acc   firstprivate(nin, nb, ny, nz, nf, nout, nx, x0, px, py, pz, m1, m2, m3, m4, m5, m6, &
     !$acc                m7, m8, m9, floor_abs, rho_min, has_negative, diagnostic)
+#endif
     do ix = 0, nb - 1
       do iy = 0, ny - 1
         do iz = 0, nz - 1

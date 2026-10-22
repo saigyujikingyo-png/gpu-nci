@@ -6,12 +6,16 @@
 !> is reached through the C ABI. The backend entries report
 !> BACKEND_UNAVAILABLE (6); the private test hooks report rc 1, because no
 !> handle here is an OpenACC context. Outputs are null or zero and inputs are
-!> ignored. Nothing here references the OpenACC runtime.
+!> ignored (in NCI_BENCHMARK builds the timing record is left unchanged).
+!> Nothing here references the OpenACC runtime.
 module nci_acc_backend
   use, intrinsic :: iso_c_binding, only: c_ptr, c_null_ptr, c_int, c_int32_t, c_int64_t
   use nci_kinds, only: dp, i8, i64
   use nci_abi, only: NCI_INVALID_ARGUMENT, NCI_BACKEND_UNAVAILABLE
   use nci_validate, only: message_t, msg_set, tile_layout
+#ifdef NCI_BENCHMARK
+  use nci_bench_types, only: nci_bench_record
+#endif
   implicit none
   private
 
@@ -67,7 +71,11 @@ contains
   recursive subroutine acc_backend_evaluate(handle, lay, periodic, m, rho, rho_min, has_negative, &
                                             diagnostic, rdg, srho, lam2, grad, hess, flags, &
                                             counts, first_global, first_status, first_nrot, &
-                                            status, msg)
+                                            status, msg &
+#ifdef NCI_BENCHMARK
+                                            , timing, fault &
+#endif
+                                            )
     type(c_ptr), intent(in) :: handle
     type(tile_layout), intent(in) :: lay
     logical, intent(in) :: periodic(3), has_negative, diagnostic
@@ -78,6 +86,10 @@ contains
     integer, intent(out) :: first_status, first_nrot
     integer(c_int), intent(out) :: status
     type(message_t), intent(inout) :: msg
+#ifdef NCI_BENCHMARK
+    type(nci_bench_record), intent(inout) :: timing
+    integer(c_int32_t), intent(in) :: fault
+#endif
     counts = 0
     first_global = -1
     first_status = 0

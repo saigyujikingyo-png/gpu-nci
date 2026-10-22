@@ -20,23 +20,38 @@ module nci_capi
   use nci_kernel
   use nci_acc_backend, only: ACC_BACKEND_COMPILED, acc_backend_create, acc_backend_destroy, &
                              acc_backend_admit, acc_backend_plan, acc_backend_evaluate
+#ifdef NCI_BENCHMARK
+  use nci_bench_types, only: nci_bench_record, nci_bench_reset, nci_bench_finish_cpu, &
+                             NCI_BENCH_FAULT_NONE, NCI_BENCH_FAULT_MAX
+#endif
   implicit none
   private
 
   public :: nci_context_create_v1, nci_eval_tile_f64_v1, nci_context_destroy_v1
   !> Private test interface (not BIND(C), not exported by the libraries).
   public :: test_backend_handle
+#ifdef NCI_BENCHMARK
+  !> Private P1 benchmark interface of the benchmark objects only (not
+  !> BIND(C); src/benchmark/core/README.md).
+  public :: nci_bench_get_timing, nci_bench_test_event_fault
+#endif
 
   integer(c_int64_t), parameter :: CTX_MAGIC = int(z'4E43495F43505531', c_int64_t)
   integer(c_int64_t), parameter :: ERRBUF_EXTENT = MSG_CAP + 1
 
   !> Heap context: one validated copy of the options and, for an OpenACC
   !> context, the handle of its private backend workspace (null otherwise).
-  !> Nothing is shared between contexts.
+  !> Nothing is shared between contexts. NCI_BENCHMARK builds add the
+  !> timing record of the latest evaluate call past the entry guards and the pending test-only
+  !> CUDA event fault of this context.
   type, bind(C) :: api_context
     integer(c_int64_t) :: magic
     type(nci_options_v1) :: options
     type(c_ptr) :: backend
+#ifdef NCI_BENCHMARK
+    type(nci_bench_record) :: timing
+    integer(c_int32_t) :: bench_fault
+#endif
   end type api_context
 
 contains
@@ -54,6 +69,47 @@ contains
     if (ctx%options%backend /= NCI_OPENACC) return
     handle = ctx%backend
   end function test_backend_handle
+
+#ifdef NCI_BENCHMARK
+  !> Timing record of the latest evaluate call past the errbuf/live-context
+  !> entry guards (state 0 if it did not reach a measured field region).
+  !> An earlier refusal can retain an older record; callers must separately
+  !> establish this call's ABI status and sample eligibility. ok: the context
+  !> is live; it does not mean that the measurement passed. An invalid
+  !> context gives ok = .false. and a zero record. Reads the context only.
+  subroutine nci_bench_get_timing(context, record, ok)
+    type(c_ptr), intent(in) :: context
+    type(nci_bench_record), intent(out) :: record
+    logical, intent(out) :: ok
+    type(api_context), pointer :: ctx
+    call nci_bench_reset(record)
+    ok = .false.
+    if (.not. c_associated(context)) return
+    call c_f_pointer(context, ctx)
+    if (ctx%magic /= CTX_MAGIC) return
+    record = ctx%timing
+    ok = .true.
+  end subroutine nci_bench_get_timing
+
+  !> TEST ONLY: arms CUDA event fault mode (0 clears, 1..NCI_BENCH_FAULT_MAX;
+  !> nci_bench_types) for the next OpenACC backend evaluation of this
+  !> context, which consumes it. ok = .false. and nothing changed for an
+  !> invalid or non-OpenACC context or an out-of-range mode.
+  subroutine nci_bench_test_event_fault(context, mode, ok)
+    type(c_ptr), intent(in) :: context
+    integer(c_int32_t), intent(in) :: mode
+    logical, intent(out) :: ok
+    type(api_context), pointer :: ctx
+    ok = .false.
+    if (.not. c_associated(context)) return
+    call c_f_pointer(context, ctx)
+    if (ctx%magic /= CTX_MAGIC) return
+    if (ctx%options%backend /= NCI_OPENACC) return
+    if (mode < NCI_BENCH_FAULT_NONE .or. mode > NCI_BENCH_FAULT_MAX) return
+    ctx%bench_fault = mode
+    ok = .true.
+  end subroutine nci_bench_test_event_fault
+#endif
 
   subroutine write_errbuf(errbuf, errbuf_len, msg)
     type(c_ptr), intent(in) :: errbuf
@@ -129,6 +185,10 @@ contains
       ctx%magic = CTX_MAGIC
       ctx%options = opt
       ctx%backend = c_null_ptr
+#ifdef NCI_BENCHMARK
+      call nci_bench_reset(ctx%timing)
+      ctx%bench_fault = NCI_BENCH_FAULT_NONE
+#endif
       if (opt%backend == NCI_OPENACC) then
         call acc_backend_create(ctx%backend, status, msg)
         if (status /= NCI_OK) then
@@ -208,6 +268,11 @@ contains
     real(dp) :: m(3, 3)
     integer :: kstatus, pstatus, nrot, i, j, nbuf
     integer(c_int) :: bstatus
+#ifdef NCI_BENCHMARK
+    integer(i64) :: span_ns(2)
+    integer :: team
+    integer(c_int32_t) :: bench_fault
+#endif
 
     status = NCI_INVALID_ARGUMENT
     if (.not. c_associated(errbuf) .and. errbuf_len /= 0) return
@@ -228,6 +293,11 @@ contains
         call msg_set(msg, 'context is not a live CPU context')
         exit body
       end if
+#ifdef NCI_BENCHMARK
+      ! Start a new observation after the errbuf and live-context entry guards.
+      ! An earlier refusal leaves the previous record unchanged.
+      call nci_bench_reset(ctx%timing)
+#endif
       opt = ctx%options
       diagnostic = opt%output_mode == NCI_DIAGNOSTIC
       use_acc = opt%backend == NCI_OPENACC
@@ -368,9 +438,18 @@ contains
       if (use_acc) then
         ! Commits fields/flags only after the downloaded device result passed
         ! every check; the first failure comes from the downloaded values.
+#ifdef NCI_BENCHMARK
+        ! The backend fills ctx%timing and consumes the pending event fault.
+        bench_fault = ctx%bench_fault
+        ctx%bench_fault = NCI_BENCH_FAULT_NONE
+#endif
         call acc_backend_evaluate(ctx%backend, lay, periodic, m, rho_a, opt%rho_min, &
                                   n_negative > 0, diagnostic, rdg_a, srho_a, lam_a, grad_a, &
-                                  hess_a, flags_a, counts, gpoint, pstatus, nrot, bstatus, msg)
+                                  hess_a, flags_a, counts, gpoint, pstatus, nrot, bstatus, msg &
+#ifdef NCI_BENCHMARK
+                                  , ctx%timing, bench_fault &
+#endif
+                                  )
         if (bstatus /= NCI_OK .and. bstatus /= NCI_INVALID_INPUT &
             .and. bstatus /= NCI_NUMERIC_FAILURE) then
           status = bstatus
@@ -379,12 +458,19 @@ contains
       else
         call evaluate_grid(lay, periodic, m, rho_a, opt%rho_min, n_negative > 0, diagnostic, &
                            int(opt%omp_threads), rdg_a, srho_a, lam_a, grad_a, hess_a, flags_a, &
-                           counts, kstatus)
+                           counts, kstatus &
+#ifdef NCI_BENCHMARK
+                           , span_ns, team &
+#endif
+                           )
         if (kstatus /= KERNEL_OK) then
           status = NCI_ALLOCATION_FAILURE
           call msg_set(msg, 'cannot allocate neighbour index tables; no output written')
           exit body
         end if
+#ifdef NCI_BENCHMARK
+        call nci_bench_finish_cpu(ctx%timing, span_ns(1), span_ns(2), team)
+#endif
       end if
 
       ! Output points only: halo samples never contribute to the stats.

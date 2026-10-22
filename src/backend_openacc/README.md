@@ -25,7 +25,11 @@ generator. Configure rejects user or configuration flags containing `fast`
 
 plus the root `-Kieee -Mnofma` and, with `NCI_ENABLE_OPENMP`, host OpenMP
 (`-mp`) for the CPU selector and the common density preflight. Fortran
-preprocessing is off and `compile_commands.json` lists these objects.
+preprocessing is off except for the generated `nci_kernel.f90`,
+`nci_acc_backend.f90` and `nci_capi.f90`, whose only conditionals are the
+`NCI_BENCHMARK` blocks of the private P1 timing objects (undefined here, so
+they compile the original statements). `compile_commands.json` lists these
+objects.
 
 ```sh
 cmake -S . -B /new/build -G Ninja -DNCI_ENABLE_OPENACC=ON \
@@ -41,6 +45,11 @@ cmake --build /new/build --parallel 2
 | `nci_cpu` (default) | production CPU sources + `nci_acc_backend_stub.f90` | `<build>/cpu/modules` |
 | `nci_openacc_objects` (OBJECT) | generated kinds/numerics/kernel, production abi/validate/capi, `nci_acc_backend.f90` | `<build>/openacc/modules` |
 | `nci_openacc` (SHARED) | the objects above | same |
+| `nci_openacc_bench_objects` (OBJECT, `NCI_BUILD_BENCHMARKS` only) | the same list with `NCI_BENCHMARK`, plus `src/benchmark/core` | `<build>/openacc/bench_modules` |
+
+The private P1 timing variant is described in
+[src/benchmark/core/README.md](../benchmark/core/README.md); `nci_openacc`,
+its tests and the worker never use those objects.
 
 Both libraries export exactly `nci_context_create_v1`,
 `nci_eval_tile_f64_v1` and `nci_context_destroy_v1`; a consumer links one.
