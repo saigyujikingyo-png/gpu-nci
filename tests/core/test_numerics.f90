@@ -82,9 +82,31 @@ contains
   end subroutine test_constants
 
   subroutine test_stencil()
-    integer :: off(3, 61), i, j, nz, naxial, nplane, ncentre
+    integer, parameter :: S(4) = [-2, -1, 1, 2]
+    integer, parameter :: PLANE(2, 3) = reshape([1, 2, 1, 3, 2, 3], [2, 3])
+    integer :: off(3, 61), expected(3, 61), i, j, nz, naxial, nplane, ncentre
+    integer :: n, ax, ip, it, ipl
     logical :: unique
     off = stencil61()
+    ! Keep the original counter-based ordering as an independent regression oracle.
+    expected = 0
+    n = 1
+    do ax = 1, 3
+      do ip = 1, 4
+        n = n + 1
+        expected(ax, n) = S(ip)
+      end do
+    end do
+    do ipl = 1, 3
+      do ip = 1, 4
+        do it = 1, 4
+          n = n + 1
+          expected(PLANE(1, ipl), n) = S(ip)
+          expected(PLANE(2, ipl), n) = S(it)
+        end do
+      end do
+    end do
+    call check(n == 61 .and. all(off == expected), 'ordered stencil matches counter-based enumeration')
     unique = .true.
     do i = 1, 61
       do j = i + 1, 61

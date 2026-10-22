@@ -77,17 +77,16 @@ contains
     integer, parameter :: PLANE(2, 3) = reshape([1, 2, 1, 3, 2, 3], [2, 3])
     integer :: n, ax, ip, it, ipl
     off = 0
-    n = 1
     do ax = 1, 3
       do ip = 1, 4
-        n = n + 1
+        n = 1 + 4 * (ax - 1) + ip
         off(ax, n) = S(ip)
       end do
     end do
     do ipl = 1, 3
       do ip = 1, 4
         do it = 1, 4
-          n = n + 1
+          n = 13 + 16 * (ipl - 1) + 4 * (ip - 1) + it
           off(PLANE(1, ipl), n) = S(ip)
           off(PLANE(2, ipl), n) = S(it)
         end do
